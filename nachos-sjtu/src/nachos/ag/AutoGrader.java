@@ -64,7 +64,6 @@ public class AutoGrader {
 				}
 			}
 		}
-
 		StringTokenizer st = new StringTokenizer(testArgsString, ",\n\t\f\r");
 
 		while (st.hasMoreTokens()) {
