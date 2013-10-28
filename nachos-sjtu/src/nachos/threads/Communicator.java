@@ -1,5 +1,7 @@
 package nachos.threads;
 
+import java.util.LinkedList;
+
 /**
  * A <i>communicator</i> allows threads to synchronously exchange 32-bit
  * messages. Multiple threads can be waiting to <i>speak</i>, and multiple
@@ -8,36 +10,63 @@ package nachos.threads;
  * be paired off at this point.
  */
 public class Communicator {
-	/**
-	 * Allocate a new communicator.
-	 */
-	public Communicator() {
-	}
+    /**
+     * Allocate a new communicator.
+     */
+    public Communicator() {
+        hasMsg = false;
+        lock = new Lock();
+        condListener = new Condition(lock);
+        condSpeaker = new Condition(lock);
+    }
 
-	/**
-	 * Wait for a thread to listen through this communicator, and then transfer
-	 * <i>word</i> to the listener.
-	 * 
-	 * <p>
-	 * Does not return until this thread is paired up with a listening thread.
-	 * Exactly one listener should receive <i>word</i>.
-	 * 
-	 * @param word
-	 *            the integer to transfer.
-	 */
-	public void speak(int word) {
-	}
+    /**
+     * Wait for a thread to listen through this communicator, and then transfer
+     * <i>word</i> to the listener.
+     * 
+     * <p>
+     * Does not return until this thread is paired up with a listening thread.
+     * Exactly one listener should receive <i>word</i>.
+     * 
+     * @param word
+     *            the integer to transfer.
+     */
+    public void speak(int word) {
+        lock.acquire();
 
-	/**
-	 * Wait for a thread to speak through this communicator, and then return the
-	 * <i>word</i> that thread passed to <tt>speak()</tt>.
-	 * 
-	 * @return the integer transferred.
-	 */
-	public int listen() {
-		return 0;
-	}
+        while (hasMsg)
+            condSpeaker.sleep();
 
-	private Lock lock;
-	private Condition condSpeaker, condListener;
+        hasMsg = true;
+        msg = word;
+
+        condListener.wake();
+        condSpeaker.sleep();
+
+        lock.release();
+    }
+
+    /**
+     * Wait for a thread to speak through this communicator, and then return the
+     * <i>word</i> that thread passed to <tt>speak()</tt>.
+     * 
+     * @return the integer transferred.
+     */
+    public int listen() {
+        lock.acquire();
+        
+        while (!hasMsg)
+            condListener.sleep();
+        hasMsg = false;
+
+        condSpeaker.wakeAll();
+        
+        lock.release();
+        return msg;
+    }
+
+    private Lock lock;
+    private Condition condSpeaker, condListener;
+    private boolean hasMsg;
+    private int msg;
 }
