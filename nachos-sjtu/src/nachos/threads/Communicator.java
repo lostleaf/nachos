@@ -37,4 +37,7 @@ public class Communicator {
 	public int listen() {
 		return 0;
 	}
+
+	private Lock lock;
+	private Condition condSpeaker, condListener;
 }
