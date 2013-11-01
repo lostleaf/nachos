@@ -134,7 +134,7 @@ public class PriorityScheduler extends Scheduler {
     /**
      * A <tt>ThreadQueue</tt> that sorts threads by priority.
      */
-    protected class PriorityQueue extends ThreadQueue {
+    public class PriorityQueue extends ThreadQueue {
         PriorityQueue(boolean transferPriority) {
             this.transferPriority = transferPriority;
         }
@@ -178,8 +178,10 @@ public class PriorityScheduler extends Scheduler {
         public void print() {
             Lib.assertTrue(Machine.interrupt().disabled());
             for (ThreadState state : waitSet)
-                System.out.println(state.thread + ": " + state.getPriority()
-                        + " " + state.getEffectivePriority());
+                System.out
+                        .println(state.thread + ": " + state.getPriority()
+                                + " " + state.getEffectivePriority() + " "
+                                + state.time);
         }
 
         public boolean isEmpty() {
@@ -211,7 +213,7 @@ public class PriorityScheduler extends Scheduler {
      * 
      * @see nachos.threads.KThread#schedulingState
      */
-    protected class ThreadState implements Comparable<ThreadState> {
+    public class ThreadState implements Comparable<ThreadState> {
         /**
          * Allocate a new <tt>ThreadState</tt> object and associate it with the
          * specified thread.
@@ -221,11 +223,10 @@ public class PriorityScheduler extends Scheduler {
          */
         public ThreadState(KThread thread) {
             this.thread = thread;
-
+            waitedSet = new HashSet<PriorityQueue>();
             setPriority(priorityDefault);
             effPriority = priorityDefault;
             time = 0;
-            waitedSet = new HashSet<PriorityQueue>();
         }
 
         /**
@@ -303,7 +304,14 @@ public class PriorityScheduler extends Scheduler {
                 waitingPQ.remove(this);
             waitingPQ = waitQueue;
 
+            System.out.println("before remove" + this.thread.toString());
+            waitQueue.print();
+            
             waitQueue.remove(this);
+
+            System.out.println("after remove" + this.thread.toString());
+            waitQueue.print();
+
             time = Machine.timer().getTime();
             waitQueue.add(this);
 
@@ -353,7 +361,7 @@ public class PriorityScheduler extends Scheduler {
         /** The priority of the associated thread. */
         protected int priority, effPriority;
         private long time; // Time of Reaching
-        private PriorityQueue waitingPQ = null;// the waiting priority queue
-        private HashSet<PriorityQueue> waitedSet;
+        public PriorityQueue waitingPQ = null;// the waiting priority queue
+        public HashSet<PriorityQueue> waitedSet;
     }
 }
