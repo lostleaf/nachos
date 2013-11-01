@@ -337,7 +337,8 @@ public class KThread {
 	 */
 	private static void runNextThread() {
 		KThread nextThread = readyQueue.nextThread();
-		readyQueue.print();
+//		System.out.println("printing readyQueue");
+//		readyQueue.print();
 		if (nextThread == null)
 			nextThread = idleThread;
 
