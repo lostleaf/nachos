@@ -281,7 +281,7 @@ public class PriorityScheduler extends Scheduler {
 					if (p.transferPriority && !p.isEmpty())
 						pri = Math.max(pri, p.pickNextThread().effPriority);
 
-				if (pri <= state.effPriority)
+				if (pri == state.effPriority)
 					return;
 
 				if (state.waitingPQ == null) {
