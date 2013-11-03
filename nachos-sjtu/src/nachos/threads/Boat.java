@@ -1,9 +1,19 @@
 package nachos.threads;
 
+import java.util.LinkedList;
+import java.util.List;
+
 import nachos.ag.BoatGrader;
 
 public class Boat {
 	static BoatGrader bg;
+
+	static private Lock lock;
+	static private Condition cv;
+	static private int nAdultsOahu, nChildrenOahu, nChildrenMolokai;
+	static private int boatLoc;
+	private static boolean missingOne;
+	private static final int OAHU = 0, MOLOKAI = 1;
 
 	public static void selfTest() {
 		BoatGrader b = new BoatGrader();
@@ -18,6 +28,15 @@ public class Boat {
 		// begin(3, 3, b);
 	}
 
+	static void forkThreads(String s, int n, List<KThread> threads, Runnable r) {
+		for (int i = 0; i < n; i++) {
+			KThread kt = new KThread(r);
+			kt.setName(s + i);
+			kt.fork();
+			threads.add(kt);
+		}
+	}
+
 	public static void begin(int adults, int children, BoatGrader b) {
 		// Store the externally generated autograder in a class
 		// variable to be accessible by children.
@@ -27,16 +46,33 @@ public class Boat {
 
 		// Create threads here. See section 3.4 of the Nachos for Java
 		// Walkthrough linked from the projects page.
+		lock = new Lock();
+		cv = new Condition(lock);
+		nAdultsOahu = adults;
+		nChildrenOahu = children;
+		nChildrenMolokai = 0;
+		boatLoc = OAHU;
+		missingOne = false;
 
-		Runnable r = new Runnable() {
+		List<KThread> threads = new LinkedList<KThread>();
+
+		forkThreads("Adult", adults, threads, new Runnable() {
+			@Override
 			public void run() {
-				SampleItinerary();
+				AdultItinerary();
 			}
-		};
-		KThread t = new KThread(r);
-		t.setName("Sample Boat Thread");
-		t.fork();
+		});
 
+		forkThreads("Child", children, threads, new Runnable() {
+			@Override
+			public void run() {
+				ChildItinerary();
+			}
+		});
+
+		// make sure judging thread is waiting
+		for (KThread kt : threads)
+			kt.join();
 	}
 
 	static void AdultItinerary() {
@@ -46,9 +82,71 @@ public class Boat {
 		 * bg.AdultRowToMolokai(); indicates that an adult has rowed the boat
 		 * across to Molokai
 		 */
+
+		lock.acquire();
+
+		// Adults are only awake at Oahu since they never come back
+		while (boatLoc == MOLOKAI || nChildrenMolokai == 0)
+			cv.sleep();
+
+		nAdultsOahu--;
+		boatLoc = MOLOKAI;
+		bg.AdultRowToMolokai();
+		cv.wakeAll();
+
+		lock.release();
 	}
 
 	static void ChildItinerary() {
+		int loc = OAHU;
+		lock.acquire();
+		while (nAdultsOahu + nChildrenOahu > 0) {
+			if (boatLoc == loc) {
+				switch (loc) {
+				case MOLOKAI:
+					nChildrenMolokai--;
+					nChildrenOahu++;
+
+					boatLoc = OAHU;
+					loc = OAHU;
+
+					bg.ChildRowToOahu();
+
+					cv.wakeAll();
+					break;
+				case OAHU:
+					if (missingOne) {
+						missingOne = false;
+
+						loc = MOLOKAI;
+						boatLoc = MOLOKAI;
+
+						nChildrenOahu -= 2;
+						nChildrenMolokai += 2;
+
+						bg.ChildRideToMolokai();
+						cv.wakeAll();
+					} else if (nChildrenOahu > 1) {
+						missingOne = true;
+						loc = MOLOKAI;
+						bg.ChildRowToMolokai();
+					} else if(nAdultsOahu==0){
+						nChildrenMolokai--;
+						nChildrenOahu++;
+
+						boatLoc = MOLOKAI;
+						loc = MOLOKAI;
+						
+						bg.ChildRowToMolokai();
+
+					} else
+						cv.sleep();
+					break;
+				}
+			} else
+				cv.sleep();
+		}
+		lock.release();
 	}
 
 	static void SampleItinerary() {
