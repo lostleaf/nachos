@@ -274,7 +274,7 @@ public class PriorityScheduler extends Scheduler {
 		}
 
 		private void changePriority(ThreadState state) {
-			System.out.println(state.thread);
+			//System.out.println(state.thread);
 			for (; state != null; state = state.waitingPQ.waitingTS) {
 				int pri = state.priority;
 				for (PriorityQueue p : state.waitedSet)
