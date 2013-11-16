@@ -97,6 +97,7 @@ public final class Processor {
 			try {
 				inst.run();
 			} catch (MipsException e) {
+//				e.printStackTrace();
 				e.handle();
 			}
 
@@ -323,11 +324,13 @@ public final class Processor {
 		TranslationEntry entry = null;
 
 		// if not using a TLB, then the vpn is an index into the table
+//		System.out.println(vaddr);
 		if (!usingTLB) {
 			if (translations == null || vpn >= translations.length
 					|| translations[vpn] == null || !translations[vpn].valid) {
 				privilege.stats.numPageFaults++;
 				Lib.debug(dbgProcessor, "\t\tpage fault");
+//				System.out.println(vaddr);
 				throw new MipsException(exceptionPageFault, vaddr);
 			}
 

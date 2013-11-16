@@ -37,7 +37,8 @@ public class UserProcess {
 		int numPhysPages = Machine.processor().getNumPhysPages();
 		pageTable = new TranslationEntry[numPhysPages];
 		for (int i = 0; i < numPhysPages; i++)
-			pageTable[i] =  new TranslationEntry(i, 0, false, false, false, false);
+			pageTable[i] = new TranslationEntry(i, i, false, false, false,
+					false);
 		numPages = 0;
 
 		files = new HashMap<Integer, OpenFile>();
@@ -75,7 +76,7 @@ public class UserProcess {
 	public boolean execute(String name, String[] args) {
 		if (!load(name, args))
 			return false;
-
+		// System.out.println("here");
 		++numProcesses;
 
 		parent = UserKernel.currentProcess();
@@ -83,7 +84,7 @@ public class UserProcess {
 		thread = (UThread) new UThread(this).setName(name);
 		thread.fork();
 
-		return true;
+		return this.status != -1;
 	}
 
 	/**
@@ -170,12 +171,13 @@ public class UserProcess {
 
 		byte[] memory = Machine.processor().getMemory();
 
-		TranslationEntry entry = translate(vaddr);
+		int vpn = vaddr / pageSize;
+		TranslationEntry entry = findPageTable(vpn);
 		if (entry == null || !entry.valid)
 			return 0;
 
-		int poffset = Processor.offsetFromAddress(vaddr);
-		int paddr = Processor.makeAddress(entry.ppn, poffset);
+		int poffset = vaddr % pageSize;
+		int paddr = pageSize * entry.ppn + poffset;
 		int num = Math.min(length, pageSize - poffset);
 
 		System.arraycopy(memory, paddr, data, offset, num);
@@ -183,7 +185,7 @@ public class UserProcess {
 		if (num >= length)
 			return num;
 
-		int t = Processor.makeAddress(1 + entry.vpn, poffset);// next addr
+		int t = (1 + entry.vpn) * pageSize;// next addr
 		return num + readVirtualMemory(t, data, offset + num, length - num);
 	}
 
@@ -191,11 +193,6 @@ public class UserProcess {
 		if (pageTable == null)
 			return null;
 		return (vpn >= 0 && vpn < pageTable.length) ? pageTable[vpn] : null;
-	}
-
-	private TranslationEntry translate(int vaddr) {
-		int vpn = Processor.pageFromAddress(vaddr);
-		return findPageTable(vpn);
 	}
 
 	/**
@@ -236,12 +233,13 @@ public class UserProcess {
 
 		byte[] memory = Machine.processor().getMemory();
 
-		TranslationEntry entry = translate(vaddr);
+		int vpn = vaddr / pageSize;
+		TranslationEntry entry = findPageTable(vpn);
 		if (entry == null || !entry.valid || entry.readOnly)
 			return 0;
 
-		int poffset = Processor.offsetFromAddress(vaddr);
-		int paddr = Processor.makeAddress(entry.ppn, poffset);
+		int poffset = vaddr % pageSize;
+		int paddr = entry.ppn * pageSize + poffset;
 		int num = Math.min(length, pageSize - poffset);
 
 		System.arraycopy(data, offset, memory, paddr, num);
@@ -249,8 +247,8 @@ public class UserProcess {
 		if (num >= length)
 			return num;
 
-		int t = Processor.makeAddress(1 + entry.vpn, poffset);// next addr
-		return num + readVirtualMemory(t, data, offset + num, length - num);
+		int t = pageSize * (1 + entry.vpn);// next addr
+		return num + writeVirtualMemory(t, data, offset + num, length - num);
 	}
 
 	/**
@@ -284,6 +282,7 @@ public class UserProcess {
 
 		// make sure the sections are contiguous and start at page 0
 		numPages = 0;
+
 		for (int s = 0; s < coff.getNumSections(); s++) {
 			CoffSection section = coff.getSection(s);
 			if (section.getFirstVPN() != numPages) {
@@ -315,11 +314,18 @@ public class UserProcess {
 		initialPC = coff.getEntryPoint();
 
 		// next comes the stack; stack pointer initially points to top of it
-		numPages += stackPages;
+		if (!allocPages(numPages, stackPages, false)) {
+			releaseResource();
+			return false;
+		}
+
 		initialSP = numPages * pageSize;
 
 		// and finally reserve 1 page for arguments
-		numPages++;
+		if (!allocPages(numPages, 1, false)) {
+			releaseResource();
+			return false;
+		}
 
 		if (!loadSections())
 			return false;
@@ -364,13 +370,15 @@ public class UserProcess {
 
 	}
 
-	private boolean allocPages(int vpn, int numPages, boolean readOnly) {
+	private boolean allocPages(int vpn, int requestPages, boolean readOnly) {
 		LinkedList<TranslationEntry> allocEntries = new LinkedList<TranslationEntry>();
 		if (vpn >= pageTable.length)
 			return false;
 
-		for (int i = 0; i < numPages; ++i) {
+		for (int i = 0; i < requestPages; ++i) {
 			int ppn = UserKernel.allocPage();
+			// System.out.println(ppn);
+			// System.out.println("do alloc"+ numPages);
 			if (ppn == -1) {
 				undoAlloc(allocEntries);
 				return false;
@@ -380,6 +388,7 @@ public class UserProcess {
 			allocEntries.add(entry);
 			pageTable[vpn + i] = entry;
 			++numPages;
+			// System.out.println(numPages);
 		}
 		return true;
 	}
@@ -553,9 +562,11 @@ public class UserProcess {
 			return handleUnlink(a0);
 		default:
 			Lib.debug(dbgProcess, "Unknown syscall " + syscall);
-			Lib.assertNotReached("Unknown system call!");
+			// Lib.assertNotReached("Unknown system call!");
+			handleError = true;
+			return -1;
 		}
-		return 0;
+		// return 0;
 	}
 
 	private int handleJoin(int processID, int statusAddr) {
@@ -591,14 +602,18 @@ public class UserProcess {
 		}
 
 		UserProcess child = newUserProcess();
-		if (!child.execute(file, args))
+		if (!child.execute(file, args)) {
+
 			return -1;
+		}
 
 		return child.pid;
 	}
 
 	private void finishWith(int status) {
 		this.status = status;
+		if (handleError)
+			this.status = -1;
 
 		coff.close();
 		for (OpenFile file : files.values())
@@ -652,16 +667,33 @@ public class UserProcess {
 		return file.write(buffer, 0, count);
 	}
 
+	public static void printHexString(byte[] b) {
+		for (int i = 0; i < b.length; i++) {
+			String hex = Integer.toHexString(b[i] & 0xFF);
+			if (hex.length() == 1) {
+				hex = '0' + hex;
+			}
+			System.out.print(hex.toUpperCase());
+			if (i % 2 == 1)
+				System.out.print(" ");
+		}
+		System.out.println();
+	}
+
 	private int handleRead(int fileDescriptor, int bufferAddr, int count) {
+
 		OpenFile file = files.get(fileDescriptor);
+
 		if (file == null)
 			return -1;
 
 		byte[] buffer = new byte[count];
+		// System.out.println(count);
 		int num = file.read(buffer, 0, count);
-
+//		printHexString(buffer);
 		if (num == -1 || writeVirtualMemory(bufferAddr, buffer, 0, num) != num)
 			return -1;
+
 		return num;
 	}
 
@@ -712,6 +744,7 @@ public class UserProcess {
 		default:
 			Lib.debug(dbgProcess, "Unexpected exception: "
 					+ Processor.exceptionNames[cause]);
+			finishWith(-1);
 			Lib.assertNotReached("Unexpected exception");
 		}
 	}
@@ -746,5 +779,6 @@ public class UserProcess {
 	private static int numProcesses = 0;
 
 	private UThread thread = null;
+	private boolean handleError = false;
 	private UserProcess parent = null;
 }
