@@ -3,15 +3,18 @@ package nachos.userprog;
 import java.io.EOFException;
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.Map;
 
 import nachos.machine.Coff;
 import nachos.machine.CoffSection;
 import nachos.machine.Config;
+import nachos.machine.Kernel;
 import nachos.machine.Lib;
 import nachos.machine.Machine;
 import nachos.machine.OpenFile;
 import nachos.machine.Processor;
 import nachos.machine.TranslationEntry;
+import nachos.threads.Lock;
 import nachos.threads.ThreadedKernel;
 
 /**
@@ -34,12 +37,18 @@ public class UserProcess {
 		int numPhysPages = Machine.processor().getNumPhysPages();
 		pageTable = new TranslationEntry[numPhysPages];
 		for (int i = 0; i < numPhysPages; i++)
-			pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
+			pageTable[i] =  new TranslationEntry(i, 0, false, false, false, false);
+		numPages = 0;
 
 		files = new HashMap<Integer, OpenFile>();
 		files.put(new Integer(0), UserKernel.console.openForReading());
 		files.put(new Integer(1), UserKernel.console.openForWriting());
 		fileId = 1024;
+
+		lock.acquire();
+		pid = ++pCounter;
+		processes.put(pid, this);
+		lock.release();
 	}
 
 	/**
@@ -67,7 +76,12 @@ public class UserProcess {
 		if (!load(name, args))
 			return false;
 
-		new UThread(this).setName(name).fork();
+		++numProcesses;
+
+		parent = UserKernel.currentProcess();
+
+		thread = (UThread) new UThread(this).setName(name);
+		thread.fork();
 
 		return true;
 	}
@@ -331,12 +345,13 @@ public class UserProcess {
 	}
 
 	private void releaseResource() {
-        for (int i = 0; i < pageTable.length; ++i)
-            if (pageTable[i].valid) {
-                UserKernel.freePage(pageTable[i].ppn);
-                pageTable[i] = new TranslationEntry(pageTable[i].vpn, 0, false, false, false, false);
-            }
-        numPages = 0;		
+		for (int i = 0; i < pageTable.length; ++i)
+			if (pageTable[i].valid) {
+				UserKernel.freePage(pageTable[i].ppn);
+				pageTable[i] = new TranslationEntry(pageTable[i].vpn, 0, false,
+						false, false, false);
+			}
+		numPages = 0;
 	}
 
 	private void undoAlloc(LinkedList<TranslationEntry> entries) {
@@ -543,6 +558,72 @@ public class UserProcess {
 		return 0;
 	}
 
+	private int handleJoin(int processID, int statusAddr) {
+		UserProcess userProcess = processes.get(processID);
+		if (userProcess == null || userProcess.parent != this)
+			return -1;
+
+		userProcess.thread.join();
+		userProcess.parent = null;
+
+		if (userProcess.status != 0)
+			return 0;
+
+		writeVirtualMemory(statusAddr, Lib.bytesFromInt(userProcess.code));
+		return 1;
+	}
+
+	private int handleExec(int fileAddr, int argc, int argvAddr) {
+		String file = readVirtualMemoryString(fileAddr, MAX_ARG_LEN);
+		if (file == null || argc < 0)
+			return -1;
+
+		String[] args = new String[argc];
+		for (int i = 0; i < argc; ++i) {
+			byte[] buffer = new byte[INT_BYTE_SIZE];
+			if (readVirtualMemory(argvAddr + i * INT_BYTE_SIZE, buffer) != buffer.length)
+				return -1;
+
+			int addr = Lib.bytesToInt(buffer, 0);
+			args[i] = readVirtualMemoryString(addr, MAX_ARG_LEN);
+			if (args[i] == null)
+				return -1;
+		}
+
+		UserProcess child = newUserProcess();
+		if (!child.execute(file, args))
+			return -1;
+
+		return child.pid;
+	}
+
+	private void finishWith(int status) {
+		this.status = status;
+
+		coff.close();
+		for (OpenFile file : files.values())
+			file.close();
+
+		for (UserProcess p : processes.values())
+			if (p.parent == this)
+				p.parent = null;
+
+		releaseResource();
+
+		--numProcesses;
+
+		if (numProcesses == 0)
+			Kernel.kernel.terminate();
+		else
+			UThread.finish();
+	}
+
+	private int handleExit(int status) {
+		code = status;
+		finishWith(0);
+		return 0;
+	}
+
 	private int handleUnlink(int a0) {
 		String name = readVirtualMemoryString(a0, MAX_ARG_LEN);
 		if (name == null)
@@ -649,10 +730,21 @@ public class UserProcess {
 
 	private int initialPC, initialSP;
 	private int argc, argv;
+	private static Lock lock = new Lock();
+	private static Map<Integer, UserProcess> processes = new HashMap<Integer, UserProcess>();
+	private static int pCounter = 0;
 
 	private static final int pageSize = Processor.pageSize;
 	private static final char dbgProcess = 'a';
 	private static final int MAX_ARG_LEN = 256;
+	private static final int INT_BYTE_SIZE = 4;
+
 	private HashMap<Integer, OpenFile> files;
 	private int fileId;
+	private int pid;
+	private int status = 0, code = 0;
+	private static int numProcesses = 0;
+
+	private UThread thread = null;
+	private UserProcess parent = null;
 }

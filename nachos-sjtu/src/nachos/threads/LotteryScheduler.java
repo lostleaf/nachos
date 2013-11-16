@@ -1,5 +1,9 @@
 package nachos.threads;
 
+import nachos.machine.Lib;
+import nachos.threads.PriorityScheduler.PriorityQueue;
+import nachos.threads.PriorityScheduler.ThreadState;
+
 /**
  * A scheduler that chooses threads using a lottery.
  * 
@@ -35,8 +39,39 @@ public class LotteryScheduler extends PriorityScheduler {
 	 *            waiting threads to the owning thread.
 	 * @return a new lottery thread queue.
 	 */
+	public static final int priorityMaximum = Integer.MAX_VALUE;
+	public static final int priorityMinimum = 1;
+
+	@Override
+	protected int getUpdatePriority(int pri, PriorityQueue p) {
+		for (ThreadState ts : p.waitSet)
+			pri += ts.effPriority;
+		return pri;
+	}
+
 	public ThreadQueue newThreadQueue(boolean transferPriority) {
-		// implement me
-		return null;
+		return new LotteryQueue(transferPriority);
+	}
+
+	public class LotteryQueue extends PriorityQueue {
+
+		@Override
+		protected ThreadState pickNextThread() {
+			int t = 0;
+			for (ThreadState ts : waitSet)
+				t += ts.effPriority;
+			int choice = Lib.random(t + 1);
+			for (ThreadState ts : waitSet) {
+				t += ts.effPriority;
+				if (t + 1 >= choice)
+					return ts;
+			}
+			return null;
+		}
+
+		LotteryQueue(boolean transferPriority) {
+			super(transferPriority);
+		}
+
 	}
 }

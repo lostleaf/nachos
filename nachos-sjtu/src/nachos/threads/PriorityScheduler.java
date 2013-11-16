@@ -29,11 +29,11 @@ import nachos.threads.PriorityScheduler.ThreadState;
  * particular, priority must be donated through locks, and through joins.
  */
 public class PriorityScheduler extends Scheduler {
-    /**
-     * Allocate a new priority scheduler.
-     */
-    public PriorityScheduler() {
-    }
+	/**
+	 * Allocate a new priority scheduler.
+	 */
+	public PriorityScheduler() {
+	}
 
 	/**
 	 * Allocate a new priority thread queue.
@@ -131,6 +131,10 @@ public class PriorityScheduler extends Scheduler {
 		return (ThreadState) thread.schedulingState;
 	}
 
+	protected int getUpdatePriority(int pri, PriorityQueue p) {
+		return Math.max(pri, p.pickNextThread().effPriority);
+	}
+
 	/**
 	 * A <tt>ThreadQueue</tt> that sorts threads by priority.
 	 */
@@ -189,21 +193,21 @@ public class PriorityScheduler extends Scheduler {
 		}
 
 		public void remove(ThreadState e) {
-//			System.out.println(this.toString() + "before remove:"
-//					+ e.thread.toString());
-//			print();
+			// System.out.println(this.toString() + "before remove:"
+			// + e.thread.toString());
+			// print();
 			waitSet.remove(e);
-//			System.out.println("after remove");
-//			print();
+			// System.out.println("after remove");
+			// print();
 		}
 
 		public boolean add(ThreadState e) {
-//			System.out.println(this.toString() + "before add:"
-//					+ e.thread.toString());
-//			print();
+			// System.out.println(this.toString() + "before add:"
+			// + e.thread.toString());
+			// print();
 			boolean ret = waitSet.add(e);
-//			System.out.println("after add:");
-//			print();
+			// System.out.println("after add:");
+			// print();
 			return ret;
 		}
 
@@ -274,12 +278,13 @@ public class PriorityScheduler extends Scheduler {
 		}
 
 		private void changePriority(ThreadState state) {
-			//System.out.println(state.thread);
+			// System.out.println(state.thread);
 			for (; state != null; state = state.waitingPQ.waitingTS) {
 				int pri = state.priority;
 				for (PriorityQueue p : state.waitedSet)
 					if (p.transferPriority && !p.isEmpty())
-						pri = Math.max(pri, p.pickNextThread().effPriority);
+						pri = getUpdatePriority(pri, p);
+				// pri = Math.max(pri, p.pickNextThread().effPriority);
 
 				if (pri == state.effPriority)
 					return;
