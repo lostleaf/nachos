@@ -195,6 +195,11 @@ public class UserProcess {
 		return (vpn >= 0 && vpn < pageTable.length) ? pageTable[vpn] : null;
 	}
 
+	private TranslationEntry translate(int vaddr) {
+		int vpn = Processor.pageFromAddress(vaddr);
+		return findPageTable(vpn);
+	}
+
 	/**
 	 * Transfer all data from the specified array to this process's virtual
 	 * memory. Same as <tt>writeVirtualMemory(vaddr, data, 0, data.length)</tt>.
