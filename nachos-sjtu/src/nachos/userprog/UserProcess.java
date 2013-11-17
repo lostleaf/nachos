@@ -168,36 +168,13 @@ public class UserProcess {
 	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
 		Lib.assertTrue(offset >= 0 && length >= 0
 				&& offset + length <= data.length);
-
-		byte[] memory = Machine.processor().getMemory();
-
-		int vpn = vaddr / pageSize;
-		TranslationEntry entry = findPageTable(vpn);
-		if (entry == null || !entry.valid)
-			return 0;
-
-		int poffset = vaddr % pageSize;
-		int paddr = pageSize * entry.ppn + poffset;
-		int num = Math.min(length, pageSize - poffset);
-
-		System.arraycopy(memory, paddr, data, offset, num);
-
-		if (num >= length)
-			return num;
-
-		int t = (1 + entry.vpn) * pageSize;// next addr
-		return num + readVirtualMemory(t, data, offset + num, length - num);
+		return readOrWriteVirtualMemory(vaddr, data, offset, length, true);
 	}
 
 	private TranslationEntry findPageTable(int vpn) {
 		if (pageTable == null)
 			return null;
 		return (vpn >= 0 && vpn < pageTable.length) ? pageTable[vpn] : null;
-	}
-
-	private TranslationEntry translate(int vaddr) {
-		int vpn = Processor.pageFromAddress(vaddr);
-		return findPageTable(vpn);
 	}
 
 	/**
@@ -235,25 +212,32 @@ public class UserProcess {
 	public int writeVirtualMemory(int vaddr, byte[] data, int offset, int length) {
 		Lib.assertTrue(offset >= 0 && length >= 0
 				&& offset + length <= data.length);
+		return readOrWriteVirtualMemory(vaddr, data, offset, length, false);
+	}
 
+	public int readOrWriteVirtualMemory(int vaddr, byte[] data, int offset,
+			int length, boolean isRead) {
 		byte[] memory = Machine.processor().getMemory();
+		int tot = 0, num;
 
-		int vpn = vaddr / pageSize;
-		TranslationEntry entry = findPageTable(vpn);
-		if (entry == null || !entry.valid || entry.readOnly)
-			return 0;
+		for (; length > 0; length -= num, offset += num, tot += num) {
+			int vpn = vaddr / pageSize;
+			TranslationEntry entry = findPageTable(vpn);
+			if (entry == null || !entry.valid || (!isRead && entry.readOnly))
+				return 0;
 
-		int poffset = vaddr % pageSize;
-		int paddr = entry.ppn * pageSize + poffset;
-		int num = Math.min(length, pageSize - poffset);
+			int poffset = vaddr % pageSize;
+			int paddr = entry.ppn * pageSize + poffset;
+			num = Math.min(length, pageSize - poffset);
 
-		System.arraycopy(data, offset, memory, paddr, num);
+			if (isRead)
+				System.arraycopy(memory, paddr, data, offset, num);
+			else
+				System.arraycopy(data, offset, memory, paddr, num);
 
-		if (num >= length)
-			return num;
-
-		int t = pageSize * (1 + entry.vpn);// next addr
-		return num + writeVirtualMemory(t, data, offset + num, length - num);
+			vaddr = pageSize * (1 + entry.vpn);// next addr
+		}
+		return tot;
 	}
 
 	/**
@@ -615,7 +599,7 @@ public class UserProcess {
 		return child.pid;
 	}
 
-	private void finishWith(int status) {
+	private void endUpWith(int status) {
 		this.status = status;
 		if (handleError)
 			this.status = -1;
@@ -640,7 +624,7 @@ public class UserProcess {
 
 	private int handleExit(int status) {
 		code = status;
-		finishWith(0);
+		endUpWith(0);
 		return 0;
 	}
 
@@ -695,7 +679,7 @@ public class UserProcess {
 		byte[] buffer = new byte[count];
 		// System.out.println(count);
 		int num = file.read(buffer, 0, count);
-//		printHexString(buffer);
+		// printHexString(buffer);
 		if (num == -1 || writeVirtualMemory(bufferAddr, buffer, 0, num) != num)
 			return -1;
 
@@ -749,7 +733,7 @@ public class UserProcess {
 		default:
 			Lib.debug(dbgProcess, "Unexpected exception: "
 					+ Processor.exceptionNames[cause]);
-			finishWith(-1);
+			endUpWith(-1);
 			Lib.assertNotReached("Unexpected exception");
 		}
 	}
