@@ -1,87 +1,114 @@
 package nachos.vm;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-
-import nachos.machine.OpenFile;
-import nachos.machine.Processor;
 import nachos.threads.ThreadedKernel;
+import nachos.machine.*;
+
+import java.util.*;
+
+class SwapEntry {
+    public int pid;
+    public int vpn;
+}
 
 public class Swap {
+    private static Swap instance = null;
 
-	private Swap(String swapName) {
-		this.swapName = swapName;
-		swapFile = VMKernel.fileSystem.open(swapName, true);
-	}
+    private Set<IntPair> unallocated;
+    private Map<IntPair, Integer> swapTable;
+    private Queue<Integer> holes;
 
-	public static Swap getSwap() {
-		if (instance == null)
-			instance = new Swap("SWAP");
-		return instance;
-	}
+    private OpenFile swapFile;
+    private int pageSize;
 
-	public int write(int pid, int vpn, byte[] page, int offset) {
-		Pair pair = new Pair(pid, vpn);
-		int pos = -1;
-		if (unAllocSet.contains(pair)) {
-			unAllocSet.remove(pair);
+    private String swapFileName;
 
-			if (queue.size() == 0)
-				queue.add(swapMap.size());
+    private Swap(String swapFileName)  {
+        this.swapFileName = swapFileName;
 
-			pos = queue.poll();
-			swapMap.put(pair, pos);
-		} else
-			pos = findEntry(pid, vpn);
+        pageSize = Machine.processor().pageSize;
+        unallocated = new HashSet<IntPair>();
+        swapTable = new HashMap<IntPair, Integer>();
+        holes = new LinkedList<Integer>();
 
-		if (pos == -1)
-			return 0;
+        swapFile = ThreadedKernel.fileSystem.open(swapFileName, true);
+//        if (swapFile == null)
+//            throw new FatalError("cannot open swap file: " + swapFileName);
+    }
 
-		swapFile.write(pos * pageSize, page, offset, pageSize);
-		return pos;
-	}
+    public static Swap getInstance(String swapFileName)  {
+        if (instance == null)
+            instance = new Swap(swapFileName);
+        return instance;
+    }
+    
+    public static Swap getSwap(){
+    	return getInstance("SWAP");
+    }
 
-	public void close() {
-		if (swapFile == null)
-			return;
+    public void close() {
+        if (swapFile != null) {
+            swapFile.close();
+            ThreadedKernel.fileSystem.remove(swapFileName);
+            swapFile = null;
+        }
+    }
 
-		swapFile.close();
-		VMKernel.fileSystem.remove(swapName);
-		swapFile = null;
-	}
+    private int findEntry(int pid, int vpn) {
+        Integer ret = swapTable.get(new IntPair(pid, vpn));
+        if (ret == null)
+            return -1;
+        else
+            return ret.intValue();
+    }
 
-	private int findEntry(int pid, int vpn) {
-		Integer ret = swapMap.get(new Pair(pid, vpn));
-		return ret == null ? -1 : ret;
-	}
+    private int allocateEntry(int pid, int vpn) {
+        IntPair ip = new IntPair(pid, vpn);
+        if (unallocated.contains(ip)) {
+            unallocated.remove(ip);
 
-	public byte[] read(int pid, int vpn) {
-		int pos = findEntry(pid, vpn);
-		byte[] ret = new byte[pageSize];
-		if (pos == -1)
-			return ret;
+            if (holes.size() == 0)
+                holes.add(new Integer(swapTable.size()));
 
-		if (swapFile.read(pos * pageSize, ret, 0, pageSize) == -1)
-			return new byte[pageSize];
-		return ret;
-	}
+            Integer i = holes.poll();
+            swapTable.put(new IntPair(pid, vpn), i);
+            return i;
+        } else {
+            return findEntry(pid, vpn);
+        }
+    }
 
-	public void add(int pid, int vpn) {
-		unAllocSet.add(new Pair(pid, vpn));
-	}
+    public void addEntry(int pid, int vpn) {
+        unallocated.add(new IntPair(pid, vpn));
+    }
 
-	public void remove(int pid, int vpn) {
-		if (findEntry(pid, vpn) != -1)
-			queue.add(swapMap.remove(new Pair(pid, vpn)));
-	}
+    public int writeToSwapfile(int pid, int vpn, byte[] page, int offset) {
+        int pos = allocateEntry(pid, vpn);
+        if (pos == -1)
+            return 0;
+        else {
+            swapFile.write(pos * pageSize, page, offset, pageSize);
+            return pos;
+        }
+    }
 
-	private static Swap instance = null;
-	private OpenFile swapFile;
-	private final int pageSize = Processor.pageSize;
-	private String swapName;
-	private HashMap<Pair, Integer> swapMap = new HashMap<Pair, Integer>();
-	private HashSet<Pair> unAllocSet = new HashSet<Pair>();
-	private LinkedList<Integer> queue = new LinkedList<Integer>();
+    public byte[] readFromSwapfile(int pid, int vpn) {
+        int pos = findEntry(pid, vpn);
+        if (pos == -1)
+            return new byte[pageSize];
 
+        byte[] ret = new byte[pageSize];
+        if (swapFile.read(pos * pageSize, ret, 0, pageSize) == -1) {
+            Lib.debug(dbgVM, "returning a new page from swapfile");
+            return new byte[pageSize];
+        } else
+            return ret;
+    }
+
+    public void removeEntry(int pid, int vpn) {
+        if (findEntry(pid, vpn) == -1)
+            return;
+        holes.add(swapTable.remove(new IntPair(pid, vpn)));
+    }
+
+    protected final static char dbgVM = 'v';
 }

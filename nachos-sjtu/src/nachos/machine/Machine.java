@@ -96,6 +96,7 @@ public final class Machine {
 	 * Print stats, and terminate Nachos.
 	 */
 	public static void halt() {
+//		new Exception().printStackTrace();
 		System.out.print("Machine halting!\n\n");
 		stats.print();
 		terminate();

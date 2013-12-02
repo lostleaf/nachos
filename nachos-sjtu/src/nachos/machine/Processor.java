@@ -96,8 +96,10 @@ public final class Processor {
 		while (true) {
 			try {
 				inst.run();
+//				inst.print();
 			} catch (MipsException e) {
 //				e.printStackTrace();
+//				inst.print();
 				e.handle();
 			}
 

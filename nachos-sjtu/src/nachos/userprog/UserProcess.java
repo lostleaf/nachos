@@ -74,6 +74,7 @@ public class UserProcess {
 	 * @return <tt>true</tt> if the program was successfully executed.
 	 */
 	public boolean execute(String name, String[] args) {
+//		Lib.debug(dbgProcess, "begin exec " + name);
 		if (!load(name, args))
 			return false;
 		// System.out.println("here");
@@ -83,6 +84,7 @@ public class UserProcess {
 
 		thread = (UThread) new UThread(this).setName(name);
 		thread.fork();
+//		Lib.debug(dbgProcess, "finish exec " + name);
 
 		return this.status != -1;
 	}
@@ -168,7 +170,10 @@ public class UserProcess {
 	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
 		Lib.assertTrue(offset >= 0 && length >= 0
 				&& offset + length <= data.length);
-		return readOrWriteVirtualMemory(vaddr, data, offset, length, true);
+		int t = readOrWriteVirtualMemory(vaddr, data, offset, length, true);
+		// Lib.debug(dbgProcess, "read vm  " + data + " " + " " + offset + " "
+		// + length);
+		return t;
 	}
 
 	protected TranslationEntry findPageTable(int vpn) {
@@ -221,6 +226,8 @@ public class UserProcess {
 
 	public int readOrWriteVirtualMemory(int vaddr, byte[] data, int offset,
 			int length, boolean isRead) {
+		
+//		Lib.debug(dbgProcess, "read or write");
 		byte[] memory = Machine.processor().getMemory();
 		int tot = 0, num;
 
@@ -340,7 +347,6 @@ public class UserProcess {
 			Lib.assertTrue(writeVirtualMemory(stringOffset, new byte[] { 0 }) == 1);
 			stringOffset += 1;
 		}
-
 		return true;
 	}
 
@@ -533,6 +539,7 @@ public class UserProcess {
 	 * @return the value to be returned to the user.
 	 */
 	public int handleSyscall(int syscall, int a0, int a1, int a2, int a3) {
+		Lib.debug(dbgProcess, "sys call " + syscall);
 		switch (syscall) {
 		case syscallHalt:
 			return handleHalt();
@@ -570,7 +577,7 @@ public class UserProcess {
 
 		userProcess.thread.join();
 		userProcess.parent = null;
-
+Lib.debug(dbgProcess, "do join");
 		if (userProcess.status != 0)
 			return 0;
 
