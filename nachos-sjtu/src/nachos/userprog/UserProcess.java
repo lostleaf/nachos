@@ -171,7 +171,7 @@ public class UserProcess {
 		return readOrWriteVirtualMemory(vaddr, data, offset, length, true);
 	}
 
-	private TranslationEntry findPageTable(int vpn) {
+	protected TranslationEntry findPageTable(int vpn) {
 		if (pageTable == null)
 			return null;
 		return (vpn >= 0 && vpn < pageTable.length) ? pageTable[vpn] : null;
@@ -215,6 +215,10 @@ public class UserProcess {
 		return readOrWriteVirtualMemory(vaddr, data, offset, length, false);
 	}
 
+	protected void beforeRW(int vpn, boolean isRead) {
+		// for overriding
+	}
+
 	public int readOrWriteVirtualMemory(int vaddr, byte[] data, int offset,
 			int length, boolean isRead) {
 		byte[] memory = Machine.processor().getMemory();
@@ -222,6 +226,7 @@ public class UserProcess {
 
 		for (; length > 0; length -= num, offset += num, tot += num) {
 			int vpn = vaddr / pageSize;
+			beforeRW(vpn, isRead);
 			TranslationEntry entry = findPageTable(vpn);
 			if (entry == null || !entry.valid || (!isRead && entry.readOnly))
 				return 0;
@@ -252,7 +257,7 @@ public class UserProcess {
 	 *            the arguments to pass to the executable.
 	 * @return <tt>true</tt> if the executable was successfully loaded.
 	 */
-	private boolean load(String name, String[] args) {
+	protected boolean load(String name, String[] args) {
 		Lib.debug(dbgProcess, "UserProcess.load(\"" + name + "\")");
 
 		OpenFile executable = ThreadedKernel.fileSystem.open(name, false);
@@ -339,7 +344,7 @@ public class UserProcess {
 		return true;
 	}
 
-	private void releaseResource() {
+	protected void releaseResource() {
 		for (int i = 0; i < pageTable.length; ++i)
 			if (pageTable[i].valid) {
 				UserKernel.freePage(pageTable[i].ppn);
@@ -349,7 +354,7 @@ public class UserProcess {
 		numPages = 0;
 	}
 
-	private void undoAlloc(LinkedList<TranslationEntry> entries) {
+	protected void undoAlloc(LinkedList<TranslationEntry> entries) {
 		for (TranslationEntry entry : entries) {
 			pageTable[entry.vpn] = new TranslationEntry(entry.vpn, 0, false,
 					false, false, false);
@@ -359,7 +364,7 @@ public class UserProcess {
 
 	}
 
-	private boolean allocPages(int vpn, int requestPages, boolean readOnly) {
+	protected boolean allocPages(int vpn, int requestPages, boolean readOnly) {
 		LinkedList<TranslationEntry> allocEntries = new LinkedList<TranslationEntry>();
 		if (vpn >= pageTable.length)
 			return false;
@@ -599,7 +604,7 @@ public class UserProcess {
 		return child.pid;
 	}
 
-	private void endUpWith(int status) {
+	protected void endUpWith(int status) {
 		this.status = status;
 		if (handleError)
 			this.status = -1;
@@ -763,7 +768,7 @@ public class UserProcess {
 
 	private HashMap<Integer, OpenFile> files;
 	private int fileId;
-	private int pid;
+	protected int pid;
 	private int status = 0, code = 0;
 	private static int numProcesses = 0;
 
