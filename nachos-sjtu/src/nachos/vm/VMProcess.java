@@ -29,10 +29,9 @@ public class VMProcess extends UserProcess {
 
 	protected boolean allocPages(int vpn, int nPages, boolean readOnly) {
 		for (int i = 0; i < nPages; ++i) {
-			PageTable.getInstance().add(
-					pid,
-					new TranslationEntry(vpn + i, 0, false, readOnly, false,
-							false));
+			TranslationEntry t = new TranslationEntry(vpn + i, 0, false,
+					readOnly, false, false);
+			PageTable.getInstance().add(pid, t);
 			Swap.getInstance().add(pid, vpn + i);
 			pages.add(new Integer(vpn + i));
 		}
@@ -267,10 +266,10 @@ public class VMProcess extends UserProcess {
 			swap(UserKernel.vpn(vaddr));
 			entry = translate(vaddr);
 		}
-		
+
 		int killed = getTLBToBeKilled();
 		killAndSubsTLBEntry(killed, entry);
-		
+
 		return true;
 	}
 
