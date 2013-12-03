@@ -2,6 +2,7 @@ package nachos.vm;
 
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.Map;
 
 import nachos.machine.CoffSection;
 import nachos.machine.Lib;
@@ -9,6 +10,7 @@ import nachos.machine.Machine;
 import nachos.machine.Processor;
 import nachos.machine.TranslationEntry;
 import nachos.threads.Lock;
+import nachos.userprog.UserKernel;
 import nachos.userprog.UserProcess;
 
 /**
@@ -21,148 +23,142 @@ public class VMProcess extends UserProcess {
 	public VMProcess() {
 		super();
 
-		vmLock = new Lock();
-		lazySections = new HashMap<Integer, IntPair>();
-		pages = new LinkedList<Integer>();
-
-		savedTLB = new TranslationEntry[Machine.processor().getTLBSize()];
-		for (int i = 0; i < Machine.processor().getTLBSize(); i++)
+		for (int i = 0; i < Machine.processor().getTLBSize(); ++i)
 			savedTLB[i] = new TranslationEntry(0, 0, false, false, false, false);
-
 	}
 
-	@Override
-	protected TranslationEntry findPageTable(int vpn) {
-		return PageTable.getPageTable().getEntry(pid, vpn);
-	}
-
-	protected void loadLazySection(int vpn, int ppn) {
-		Lib.debug(dbgVM, "\tload lazy section to virtual page " + vpn
-				+ " on phys page " + ppn);
-		IntPair pair = lazySections.remove(vpn);
-		if (pair == null)
-			return;
-
-		CoffSection section = coff.getSection(pair.int1);
-		coff.getSection(pair.int1).loadPage(pair.int2, ppn);
-	}
-
-	protected void swapIn(int ppn, int vpn) {
-        Lib.debug(dbgVM, "\tswapping in virtual page " + vpn + " to phys page " + ppn);
-
-        TranslationEntry entry = findPageTable(vpn);
-        Lib.assertTrue(entry != null, "Target doesn't exist in page table");
-        Lib.assertTrue(!entry.valid, "Target entry is valid");
-
-        boolean dirty = false;
-        if (lazySections.containsKey(new Integer(vpn))) {
-            loadLazySection(vpn, ppn);
-            dirty = true;
-        } else {
-            byte[] page = Swap.getSwap().readFromSwapfile(pid, vpn);
-            byte[] memory = Machine.processor().getMemory();
-            System.arraycopy(page, 0, memory, ppn * pageSize, pageSize);
-
-            dirty = false;
-        }
-
-        TranslationEntry supplant = new TranslationEntry(entry);
-        supplant.valid = true;
-        supplant.ppn = ppn;
-        supplant.used = dirty;
-        supplant.dirty = dirty;
-        PageTable.getInstance().setEntry(pid, supplant);
-	}
-
-	protected int swap(int vpn) {
-		TranslationEntry entry = findPageTable(vpn);
-		Lib.assertTrue(entry != null, "page " + vpn + " not in PageTable");
-
-		if (entry.valid)
-			return entry.ppn;
-
-		int ppn = findFreePage();
-		swapIn(ppn, vpn);
-
-		return ppn;
-	}
-
-	@Override
-	protected void beforeRW(int vpn, boolean isRead) {
-		vmLock.acquire();
-
-		swap(vpn);
-		TranslationEntry entry = findPageTable(vpn);
-
-		if (isRead)
-			entry.used = true;
-		else
-			entry.dirty = true;
-
-		PageTable.getPageTable().setEntry(pid, entry);
-		vmLock.release();
-	}
-
-	protected int findFreePage() {
-		int ppn = VMKernel.allocPage();
-		if (ppn == -1) {
-			TranslationEntryWithPid victim = PageTable.getPageTable().pickVictim();
-			ppn = victim.entry.ppn;
-			swapOut(victim.pid, victim.entry.vpn);
-
+	protected boolean allocPages(int vpn, int nPages, boolean readOnly) {
+		for (int i = 0; i < nPages; ++i) {
+			PageTable.getInstance().add(
+					pid,
+					new TranslationEntry(vpn + i, 0, false, readOnly, false,
+							false));
+			Swap.getInstance().add(pid, vpn + i);
+			pages.add(new Integer(vpn + i));
 		}
+
+		numPages += nPages;
+
+		return true;
+	}
+
+	protected TranslationEntry findPageTable(int vpn) {
+		return PageTable.getInstance().get(pid, vpn);
+	}
+
+	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
+		vmLock.acquire();
+		swap(VMKernel.vpn(vaddr));
+		TranslationEntry entry = translate(vaddr);
+		entry.used = true;
+		PageTable.getInstance().set(pid, entry);
+		vmLock.release();
+		return super.readVirtualMemory(vaddr, data, offset, length);
+	}
+
+	public int writeVirtualMemory(int vaddr, byte[] data, int offset, int length) {
+		vmLock.acquire();
+		swap(VMKernel.vpn(vaddr));
+
+		TranslationEntry entry = translate(vaddr);
+		entry.dirty = true;
+		PageTable.getInstance().set(pid, entry);
+
+		vmLock.release();
+		return super.writeVirtualMemory(vaddr, data, offset, length);
+	}
+
+	protected int getFreePage() {
+		int ppn = VMKernel.allocPage();
+
+		if (ppn == -1) {
+			PidTEPair killed = PageTable.getInstance().getToBeKilled();
+
+			ppn = killed.entry.ppn;
+			swapOut(killed.pid, killed.entry.vpn);
+		}
+
 		return ppn;
 	}
-	protected void swapOut(int pid, int vpn){
-        TranslationEntry entry = PageTable.getInstance().getEntry(pid, vpn);
 
-		// kill the to be killed entry
-		for (int i = 0; i < Machine.processor().getTLBSize(); i++) {
-			TranslationEntry tlbEntry = Machine.processor().readTLBEntry(i);
+	protected void swapOut(int pid, int vpn) {
+		TranslationEntry entry = PageTable.getInstance().get(pid, vpn);
 
+		Processor processor = Machine.processor();
+		for (int i = 0; i < processor.getTLBSize(); ++i) {
+			TranslationEntry tlbEntry = processor.readTLBEntry(i);
 			if (tlbEntry.valid && tlbEntry.vpn == entry.vpn
 					&& tlbEntry.ppn == entry.ppn) {
-				PageTable.getPageTable().combineEntry(pid, tlbEntry);
-				entry = PageTable.getPageTable().getEntry(pid, entry.vpn);
+				PageTable.getInstance().merge(pid, tlbEntry);
+				entry = PageTable.getInstance().get(pid, vpn);
+
 				tlbEntry.valid = false;
-				Machine.processor().writeTLBEntry(i, tlbEntry);
+				processor.writeTLBEntry(i, tlbEntry);
+
 				break;
 			}
 		}
 
 		if (entry.dirty) {
 			byte[] memory = Machine.processor().getMemory();
-			Swap.getSwap().writeToSwapfile(pid, entry.vpn, memory,
+			Swap.getInstance().write(pid, entry.vpn, memory,
 					entry.ppn * pageSize);
 		}
 
 		entry.valid = false;
-		PageTable.getPageTable().setEntry(pid, entry);
+		PageTable.getInstance().set(pid, entry);
 	}
-	@Override
-	protected boolean allocPages(int vpn, int requestPages, boolean readOnly) {
-		for (int i = 0; i < requestPages; i++) {
-			PageTable.getPageTable().addEntry(
-					pid,
-					new TranslationEntry(vpn + i, 0, false, readOnly, false,
-							false));
-			Swap.getSwap().addEntry(pid, vpn + i);
-			pages.add(new Integer(vpn + i));
+
+	protected int swap(int vpn) {
+		TranslationEntry entry = findPageTable(vpn);
+
+		if (entry.valid)
+			return entry.ppn;
+
+		int ppn = getFreePage();
+		swapIn(ppn, vpn);
+
+		return ppn;
+	}
+
+	protected void swapIn(int ppn, int vpn) {
+		TranslationEntry entry = findPageTable(vpn);
+
+		boolean dirty = false;
+		if (lazySec.containsKey(new Integer(vpn))) {
+			loadLazySection(vpn, ppn);
+			dirty = true;
+		} else {
+			byte[] page = Swap.getInstance().read(pid, vpn);
+			byte[] memory = Machine.processor().getMemory();
+			System.arraycopy(page, 0, memory, ppn * pageSize, pageSize);
+
+			dirty = false;
 		}
-		numPages += requestPages;
-		return true;
+
+		TranslationEntry subs = new TranslationEntry(entry);
+		subs.valid = true;
+		subs.ppn = ppn;
+		subs.dirty = subs.used = dirty;
+		PageTable.getInstance().set(pid, subs);
 	}
 
-	@Override
-	protected void releaseResource() {
-		for (int vpn : pages) {
-			vmLock.acquire();
+	protected void loadLazySection(int vpn, int ppn) {
+		IPair ip = lazySec.remove(new Integer(vpn));
+		if (ip == null)
+			return;
+		coff.getSection(ip.first).loadPage(ip.second, ppn);
+	}
 
-			TranslationEntry entry = PageTable.getPageTable().removeEntry(pid,
-					vpn);
+	protected void releaseResource() {
+		for (Integer vpn : pages) {
+			vmLock.acquire();
+			TranslationEntry entry = PageTable.getInstance().remove(pid,
+					vpn.intValue());
 			if (entry.valid)
 				VMKernel.freePage(entry.ppn);
-			Swap.getSwap().removeEntry(pid, vpn);
+
+			Swap.getInstance().remove(pid, vpn.intValue());
 
 			vmLock.release();
 		}
@@ -173,12 +169,14 @@ public class VMProcess extends UserProcess {
 	 * Called by <tt>UThread.saveState()</tt>.
 	 */
 	public void saveState() {
-		// Lib.debug(dbgVM, "save state--save TLB pid " + pid);
+		Lib.debug(dbgVM, "save state " + pid);
 
-		for (int i = 0; i < Machine.processor().getTLBSize(); i++) {
-			savedTLB[i] = Machine.processor().readTLBEntry(i);
+		Processor processor = Machine.processor();
+
+		for (int i = 0; i < processor.getTLBSize(); ++i) {
+			savedTLB[i] = processor.readTLBEntry(i);
 			if (savedTLB[i].valid)
-				PageTable.getPageTable().combineEntry(pid, savedTLB[i]);
+				PageTable.getInstance().merge(pid, processor.readTLBEntry(i));
 		}
 
 		super.saveState();
@@ -189,18 +187,17 @@ public class VMProcess extends UserProcess {
 	 * <tt>UThread.restoreState()</tt>.
 	 */
 	public void restoreState() {
-		// Lib.debug(dbgVM, "restore state--restore TLB; pid:" + pid);
+		Lib.debug(dbgVM, "restore state " + pid);
 
-		for (int i = 0; i < Machine.processor().getTLBSize(); i++) {
-			TranslationEntry saved = Machine.processor().readTLBEntry(i);
-			boolean flag = false;
-			if (saved.valid) {
-				TranslationEntry t = findPageTable(saved.vpn);
-				flag = t != null && t.valid;
+		Processor processor = Machine.processor();
+		for (int i = 0; i < processor.getTLBSize(); ++i) {
+			TranslationEntry t = invalidEntry();
+			if (savedTLB[i].valid) {
+				TranslationEntry entry = findPageTable(savedTLB[i].vpn);
+				if (entry != null && entry.valid)
+					t = savedTLB[i];
 			}
-			TranslationEntry subs = flag ? saved : new TranslationEntry(0, 0,
-					false, false, false, false);
-			Machine.processor().writeTLBEntry(i, subs);
+			processor.writeTLBEntry(i, t);
 		}
 	}
 
@@ -211,13 +208,16 @@ public class VMProcess extends UserProcess {
 	 * @return <tt>true</tt> if successful.
 	 */
 	protected boolean loadSections() {
-		for (int j = 0; j < coff.getNumSections(); j++) {
-			CoffSection cSection = coff.getSection(j);
+		for (int s = 0; s < coff.getNumSections(); s++) {
+			CoffSection coffSection = coff.getSection(s);
 
-			for (int i = 0; i < cSection.getLength(); i++)
-				lazySections.put(cSection.getFirstVPN() + i, new IntPair(j, i));
+			for (int i = 0; i < coffSection.getLength(); i++) {
+				int vpn = coffSection.getFirstVPN() + i;
+
+				lazySec.put(new Integer(vpn), new IPair(new Integer(s),
+						new Integer(i)));
+			}
 		}
-
 		return true;
 	}
 
@@ -237,63 +237,69 @@ public class VMProcess extends UserProcess {
 	 *            the user exception that occurred.
 	 */
 	public void handleException(int cause) {
-		if (cause != Processor.exceptionTLBMiss) {
+		Processor processor = Machine.processor();
+
+		switch (cause) {
+		case Processor.exceptionTLBMiss:
+			vmLock.acquire();
+			int vaddr = processor.readRegister(Processor.regBadVAddr);
+
+			if (!handleTLBMiss(vaddr)) {
+				vmLock.release();
+				finishWith(cause);
+			} else
+				vmLock.release();
+
+			break;
+
+		default:
 			super.handleException(cause);
-			return;
+			break;
 		}
-
-		vmLock.acquire();
-		int vaddr = Machine.processor().readRegister(Processor.regBadVAddr);
-
-		if (!handleTLBMiss(vaddr)) {
-			Lib.debug(dbgVM, "Page fault!! handle TLB miss failed. bad address"
-					+ vaddr);
-			vmLock.release();
-			endUpWith(cause);
-			return;
-		}
-
-		vmLock.release();
 	}
 
-	private boolean handleTLBMiss(int vaddr) {
-		int vpn = vaddr / pageSize;
-		TranslationEntry entry = findPageTable(vpn);
+	protected boolean handleTLBMiss(int vaddr) {
+		TranslationEntry entry = translate(vaddr);
 		if (entry == null)
 			return false;
 
 		if (!entry.valid) {
-			swap(vpn);
-			entry = findPageTable(vpn);
+			swap(UserKernel.vpn(vaddr));
+			entry = translate(vaddr);
 		}
-
-		// find an entry in TLB to substitute
-		int subsIndex = -1;
-		for (int i = 0; i < Machine.processor().getTLBSize(); ++i)
-			if (Machine.processor().readTLBEntry(i).valid == false) {
-				subsIndex = i;
-				break;
-			}
-		if (subsIndex == -1)
-			subsIndex = Lib.random(Machine.processor().getTLBSize());
-
-		// do substitute
-		TranslationEntry tlbEntry = Machine.processor().readTLBEntry(subsIndex);
-		if (tlbEntry.valid)
-			PageTable.getPageTable().combineEntry(pid, tlbEntry);
-
-		Machine.processor().writeTLBEntry(subsIndex, entry);
-
+		
+		int killed = getTLBToBeKilled();
+		killAndSubsTLBEntry(killed, entry);
+		
 		return true;
 	}
 
-	private static final int pageSize = Processor.pageSize;
-	private static final char dbgProcess = 'a';
-	private static final char dbgVM = 'v';
-	private Lock vmLock;
+	private TranslationEntry invalidEntry() {
+		return new TranslationEntry(0, 0, false, false, false, false);
+	}
 
-	protected HashMap<Integer, IntPair> lazySections = null;
-	protected LinkedList<Integer> pages = null;
-	protected TranslationEntry[] savedTLB = null;
+	protected int getTLBToBeKilled() {
+		for (int i = 0; i < Machine.processor().getTLBSize(); ++i)
+			if (Machine.processor().readTLBEntry(i).valid == false)
+				return i;
 
+		return Lib.random(Machine.processor().getTLBSize());
+	}
+
+	protected void killAndSubsTLBEntry(int index, TranslationEntry subs) {
+		TranslationEntry entry = Machine.processor().readTLBEntry(index);
+		if (entry.valid)
+			PageTable.getInstance().merge(pid, entry);
+
+		Machine.processor().writeTLBEntry(index, subs);
+	}
+
+	protected Map<Integer, IPair> lazySec = new HashMap<Integer, IPair>();
+	protected LinkedList<Integer> pages = new LinkedList<Integer>();
+	protected TranslationEntry[] savedTLB = new TranslationEntry[Machine
+			.processor().getTLBSize()];
+
+	protected static Lock vmLock = new Lock();
+	protected static final int pageSize = Processor.pageSize;
+	protected static final char dbgVM = 'v';
 }

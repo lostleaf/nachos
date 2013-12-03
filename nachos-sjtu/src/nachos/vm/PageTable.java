@@ -1,30 +1,15 @@
 package nachos.vm;
 
-import nachos.machine.*;
+import java.util.HashMap;
+
+import nachos.machine.Lib;
+import nachos.machine.Machine;
 import nachos.machine.TranslationEntry;
 
-import java.util.*;
-
-class TranslationEntryWithPid {
-	public TranslationEntry entry;
-	public int pid;
-
-	public TranslationEntryWithPid(TranslationEntry entry, int pid) {
-		this.entry = entry;
-		this.pid = pid;
-	}
-}
-
 public class PageTable {
-	private static PageTable instance = null;
-
-	private Map<IntPair, TranslationEntry> pageTable;
-	private TranslationEntryWithPid[] coreMap;
 
 	private PageTable() {
-		pageTable = new HashMap<IntPair, TranslationEntry>();
-		coreMap = new TranslationEntryWithPid[Machine.processor()
-				.getNumPhysPages()];
+
 	}
 
 	public static PageTable getInstance() {
@@ -33,113 +18,85 @@ public class PageTable {
 		return instance;
 	}
 
-	public static PageTable getPageTable() {
-		return getInstance();
-	}
-
-	public TranslationEntry getEntry(int pid, int vpn) {
-		IntPair ip = new IntPair(pid, vpn);
-		if (pageTable.containsKey(ip))
-			return new TranslationEntry(pageTable.get(ip));
-		else
-			return null;
-	}
-
-	private TranslationEntry combine(TranslationEntry e1, TranslationEntry e2) {
-		TranslationEntry ret = new TranslationEntry(e1);
-		if (e1.used || e2.used)
-			ret.used = true;
-		if (e1.dirty || e2.dirty)
-			ret.dirty = true;
-		return ret;
-	}
-
-	private void setEntryRaw(int pid, TranslationEntry entry,
-			boolean combineEntries) {
-		IntPair vip = new IntPair(pid, entry.vpn);
-		if (!pageTable.containsKey(vip))
-			return;
-
-		TranslationEntry old = pageTable.get(vip);
-		TranslationEntry supplant = combineEntries ? new TranslationEntry(
-				combine(entry, old)) : new TranslationEntry(entry);
-
-		if (old.valid) {
-			Lib.assertTrue(coreMap[old.ppn] != null, "coreMap inconsistent");
-			coreMap[old.ppn] = null;
-			Lib.debug(dbgVM, "\tcleared coreMap[" + old.ppn + "]");
-		}
-		if (entry.valid) {
-			Lib.assertTrue(coreMap[entry.ppn] == null, "coreMap inconsistent");
-			coreMap[entry.ppn] = new TranslationEntryWithPid(supplant, pid);
-		}
-
-		pageTable.put(vip, supplant);
-	}
-
-	public void setEntry(int pid, TranslationEntry entry) {
-		setEntryRaw(pid, entry, false);
-	}
-
-	public void combineEntry(int pid, TranslationEntry entry) {
-		setEntryRaw(pid, entry, true);
-	}
-
-	public boolean addEntry(int pid, TranslationEntry entry) {
-		IntPair ip = new IntPair(pid, entry.vpn);
+	public boolean add(int pid, TranslationEntry entry) {
+		IPair ip = new IPair(pid, entry.vpn);
 		if (pageTable.containsKey(ip))
 			return false;
 
 		entry = new TranslationEntry(entry);
 		pageTable.put(ip, entry);
 		if (entry.valid)
-			coreMap[entry.ppn] = new TranslationEntryWithPid(entry, pid);
+			pageInfo[entry.ppn] = new PidTEPair(entry, pid);
 
 		return true;
 	}
 
-	public TranslationEntry removeEntry(int pid, int vpn) {
-		TranslationEntry entry = pageTable.remove(new IntPair(pid, vpn));
+	public TranslationEntry remove(int pid, int vpn) {
+		TranslationEntry entry = pageTable.remove(new IPair(pid, vpn));
+
 		if (entry != null && entry.valid)
-			coreMap[entry.ppn] = null;
+			pageInfo[entry.ppn] = null;
 
 		return entry;
 	}
 
-	public TranslationEntryWithPid pickVictim() {
-		TranslationEntryWithPid ret = null;
+	private TranslationEntry mergeInfo(TranslationEntry entry1,
+			TranslationEntry entry2) {
+		TranslationEntry ret = new TranslationEntry(entry1);
+
+		ret.used = (entry1.used || entry2.used);
+		ret.dirty = (entry1.dirty || entry2.dirty);
+		return ret;
+	}
+
+	public PidTEPair getToBeKilled() {
+		PidTEPair ret = null;
 		do {
-			int index = Lib.random(coreMap.length);
-			ret = coreMap[index];
+			int index = Lib.random(pageInfo.length);
+			ret = pageInfo[index];
 		} while (ret == null || ret.entry.valid == false);
 
 		return ret;
 	}
 
-	public void output(boolean onlyCoreMap) {
-		if (!onlyCoreMap) {
-			Lib.debug(dbgVM, "\tpid\tvpn\tvalid\tppn");
-			for (Map.Entry<IntPair, TranslationEntry> entry : pageTable
-					.entrySet()) {
-				int pid = entry.getKey().int1;
-				TranslationEntry e = entry.getValue();
-				Lib.debug(dbgVM, "\t" + new Integer(pid).toString() + "\t"
-						+ new Integer(e.vpn).toString() + "\t"
-						+ new Boolean(e.valid).toString() + "\t"
-						+ new Integer(e.ppn).toString());
-			}
-		}
-		Lib.debug(dbgVM, "\tppn\tpid\tvpn");
-		for (int i = 0; i < coreMap.length; ++i) {
-			Lib.debug(dbgVM, "\t"
-					+ new Integer(i).toString()
-					+ "\t"
-					+ (coreMap[i] == null ? "N/A\tN/A" : new Integer(
-							coreMap[i].pid).toString()
-							+ "\t"
-							+ new Integer(coreMap[i].entry.vpn).toString()));
-		}
+	public TranslationEntry get(int pid, int vpn) {
+		IPair iPair = new IPair(pid, vpn);
+		if (!pageTable.containsKey(iPair))
+			return null;
+		return new TranslationEntry(pageTable.get(iPair));
 	}
+
+	public void set(int pid, TranslationEntry entry) {
+		setOrMerge(pid, entry, false);
+	}
+
+	public void merge(int pid, TranslationEntry entry) {
+		setOrMerge(pid, entry, true);
+	}
+
+	private void setOrMerge(int pid, TranslationEntry entry, boolean isMerge) {
+		IPair pvPair = new IPair(pid, entry.vpn);
+		if (!pageTable.containsKey(pvPair))
+			return;
+
+		TranslationEntry last = pageTable.get(pvPair);
+		TranslationEntry subs = isMerge ? new TranslationEntry(mergeInfo(entry,
+				last)) : new TranslationEntry(entry);
+
+		if (last.valid)
+			pageInfo[last.ppn] = null;
+
+		if (entry.valid)
+			pageInfo[entry.ppn] = new PidTEPair(subs, pid);
+
+		pageTable.put(pvPair, subs);
+	}
+
+	private static PageTable instance = null;
+
+	private HashMap<IPair, TranslationEntry> pageTable = new HashMap<IPair, TranslationEntry>();
+	private PidTEPair[] pageInfo = new PidTEPair[Machine.processor()
+			.getNumPhysPages()];
 
 	protected static final char dbgVM = 'v';
 }
