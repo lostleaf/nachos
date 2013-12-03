@@ -33,7 +33,7 @@ public class VMProcess extends UserProcess {
 					readOnly, false, false);
 			PageTable.getInstance().add(pid, t);
 			Swap.getInstance().add(pid, vpn + i);
-			pages.add(new Integer(vpn + i));
+			allocatedPages.add(new Integer(vpn + i));
 		}
 
 		numPages += nPages;
@@ -150,7 +150,7 @@ public class VMProcess extends UserProcess {
 	}
 
 	protected void releaseResource() {
-		for (Integer vpn : pages) {
+		for (Integer vpn : allocatedPages) {
 			vmLock.acquire();
 			TranslationEntry entry = PageTable.getInstance().remove(pid,
 					vpn.intValue());
@@ -294,7 +294,7 @@ public class VMProcess extends UserProcess {
 	}
 
 	protected Map<Integer, IPair> lazySec = new HashMap<Integer, IPair>();
-	protected LinkedList<Integer> pages = new LinkedList<Integer>();
+	protected LinkedList<Integer> allocatedPages = new LinkedList<Integer>();
 	protected TranslationEntry[] savedTLB = new TranslationEntry[Machine
 			.processor().getTLBSize()];
 
