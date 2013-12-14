@@ -1,6 +1,7 @@
 package nachos.filesys;
 
 import java.util.LinkedList;
+
 import nachos.machine.FileSystem;
 import nachos.machine.Machine;
 import nachos.machine.OpenFile;
