@@ -71,9 +71,11 @@ public class Directory extends INode {
     }
 
     public int findPos(String name) {
-        for (int i = 0; i < validCount; ++i)
+        for (int i = 0; i < validCount; ++i){
+            Lib.debug('f', subDirs[i]);
             if (subDirs[i].equals(name))
                 return i;
+            }
         return -1;
     }
 

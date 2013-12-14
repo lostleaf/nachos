@@ -88,5 +88,5 @@ public class Swap {
 	private OpenFile swapFile;
 	private int pageSize = Processor.pageSize;
 
-	private final String swapName = "SWAP";
+	private final String swapName = "/SWAP";
 }

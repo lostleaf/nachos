@@ -340,6 +340,8 @@ public class RealFileSystem implements FileSystem {
         Lib.assertTrue(parent != null);
 
         Entry entry = parent.find(fileName);
+        Lib.debug(dbgFilesys, "reached2" + fileName);
+
         if (entry != null)
             return entry;
         else if (parent.hasNext())
@@ -388,7 +390,7 @@ public class RealFileSystem implements FileSystem {
                 e = absoluteFileName.substring(token + 1);
 
             Entry entry = findSingleEntry(current, e);
-
+            Lib.debug(dbgFilesys, "reached1");
             if (entry == null)
                 return null;
             else {
@@ -441,7 +443,7 @@ public class RealFileSystem implements FileSystem {
         String path = containingPath(absoluteFileName), file = fileName(absoluteFileName);
         if (path == null || file == null)
             return null;
-
+        // Lib.debug(dbgFilesys, path);
         Entry eFolder = findEntry(path, true);
 
         if (eFolder == null || eFolder.type != Entry.DIRECTORY)
@@ -572,7 +574,6 @@ public class RealFileSystem implements FileSystem {
 
         Entry e = findFileEntry(name, create);
         if (e == null) {
-            // new Exception().printStackTrace();
             Lib.debug(dbgFilesys, "\t" + name + " not found");
             return null;
         } else if (e.type == Entry.NORMAL_FILE) {
@@ -608,7 +609,7 @@ public class RealFileSystem implements FileSystem {
             return false;
 
         Entry eFolder = findEntry(path, true);
-        Lib.debug(dbgFilesys,  String.valueOf(eFolder == null));
+        Lib.debug(dbgFilesys, String.valueOf(eFolder == null));
         if (eFolder == null || eFolder.type != Entry.DIRECTORY)
             return false;
         Directory folder = (Directory) eFolder.load();
