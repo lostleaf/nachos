@@ -9,26 +9,27 @@ import nachos.vm.VMKernel;
  * @author starforever
  */
 public class FilesysKernel extends VMKernel {
-    public static final char DEBUG_FLAG = 'f';
+    public static final char dbgFilesys = 'f';
 
     public static RealFileSystem realFileSystem;
 
-    public FilesysKernel() {
+    public FilesysKernel () {
         super();
     }
 
-    public void initialize(String[] args) {
+    public void initialize (String[] args) {
         super.initialize(args);
         boolean format = Config.getBoolean("FilesysKernel.format");
         fileSystem = realFileSystem = new RealFileSystem();
         realFileSystem.init(format);
     }
 
-    public void selfTest() {
+    public void selfTest () {
         super.selfTest();
     }
 
-    public void terminate() {
+    public void terminate () {
+//        closeSwapFile();
         realFileSystem.finish();
         super.terminate();
     }
