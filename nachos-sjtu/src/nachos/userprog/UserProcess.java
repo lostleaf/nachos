@@ -61,7 +61,7 @@ public class UserProcess {
      * @return <tt>true</tt> if the program was successfully executed.
      */
     public boolean execute(String name, String[] args) {
-        if (!load(absoluteFileName(name), args))
+        if (!load(toAbsPath(name), args))
             return false;
 
         ++aliveProcNum;
@@ -446,11 +446,11 @@ public class UserProcess {
     }
 
     protected int createOrOpen(int a0, boolean create) {
-        String fileName = readVirtualMemoryString(a0, maxArgLen);
+        String fileName = readVirtualMemoryString(a0, MAX_ARG_LEN);
         if (fileName == null)
             return -1;
 
-        OpenFile of = ThreadedKernel.fileSystem.open(absoluteFileName(fileName), create);
+        OpenFile of = ThreadedKernel.fileSystem.open(toAbsPath(fileName), create);
         if (of == null)
             return -1;
 
@@ -504,22 +504,22 @@ public class UserProcess {
     }
 
     protected int handleUnlink(int nameAddr) {
-        String file = readVirtualMemoryString(nameAddr, maxArgLen);
+        String file = readVirtualMemoryString(nameAddr, MAX_ARG_LEN);
         if (file == null)
             return -1;
 
-        if (ThreadedKernel.fileSystem.remove(absoluteFileName(file)))
+        if (ThreadedKernel.fileSystem.remove(toAbsPath(file)))
             return 0;
         else
             return -1;
     }
 
-    public String absoluteFileName(String s) {
+    public String toAbsPath(String s) {
         return s;
     }
 
     protected int handleExec(int nameAddr, int argc, int argvAddr) {
-        String file = readVirtualMemoryString(nameAddr, maxArgLen);
+        String file = readVirtualMemoryString(nameAddr, MAX_ARG_LEN);
         if (file == null)
             return -1;
 
@@ -532,7 +532,7 @@ public class UserProcess {
             if (readVirtualMemory(argvAddr + i * 4, buffer) != buffer.length)
                 return -1;
             int addr = Lib.bytesToInt(buffer, 0);
-            args[i] = readVirtualMemoryString(addr, maxArgLen);
+            args[i] = readVirtualMemoryString(addr, MAX_ARG_LEN);
             if (args[i] == null)
                 return -1;
         }
@@ -776,7 +776,7 @@ public class UserProcess {
 
     protected Map<Integer, OpenFile> openFiles = new HashMap<Integer, OpenFile>();
     protected int fileId;
-    protected static final int maxArgLen = 256;
+    protected static final int MAX_ARG_LEN = 256;
 
     protected static int pidCounter = 0;
     protected int pid;

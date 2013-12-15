@@ -22,9 +22,9 @@ public class RealFileSystem implements FileSystem {
     private static class CachedNormalFile {
         private boolean dirty;
         private int useCount;
-        private NormalFile normalFile;
+        private PlainINode normalFile;
 
-        public CachedNormalFile(NormalFile nf) {
+        public CachedNormalFile(PlainINode nf) {
             normalFile = nf;
             dirty = false;
             useCount = 0;
@@ -47,7 +47,7 @@ public class RealFileSystem implements FileSystem {
             dirty = true;
         }
 
-        public NormalFile normalFile() {
+        public PlainINode normalFile() {
             return normalFile;
         }
 
@@ -75,14 +75,14 @@ public class RealFileSystem implements FileSystem {
             if (length() == 0)
                 return 0;
             else
-                return ((length() - 1) / DiskHelper.getBlockSize()) + 1;
+                return ((length() - 1) / DiskUtils.BLOCK_SIZE) + 1;
         }
 
         private int readBlock(int block, byte[] buffer, int offset) {
             if (block >= getBlockCount())
                 return 0;
 
-            NormalFile current = cnf.normalFile();
+            PlainINode current = cnf.normalFile();
             while (block >= current.getValidCount()) {
                 block -= current.getValidCount();
                 current = current.loadNext();
@@ -92,9 +92,9 @@ public class RealFileSystem implements FileSystem {
 
             int r = 0;
             if (block == getBlockCount() - 1)
-                r = length() % DiskHelper.getBlockSize();
+                r = length() % DiskUtils.BLOCK_SIZE;
             if (r == 0)
-                r = DiskHelper.getBlockSize();
+                r = DiskUtils.BLOCK_SIZE;
 
             return r;
         }
@@ -103,7 +103,7 @@ public class RealFileSystem implements FileSystem {
             if (block >= getBlockCount())
                 return 0;
 
-            NormalFile current = cnf.normalFile();
+            PlainINode current = cnf.normalFile();
             while (block >= current.getValidCount()) {
                 block -= current.getValidCount();
                 current = current.loadNext();
@@ -113,9 +113,9 @@ public class RealFileSystem implements FileSystem {
 
             int r = 0;
             if (block == getBlockCount() - 1)
-                r = length() % DiskHelper.getBlockSize();
+                r = length() % DiskUtils.BLOCK_SIZE;
             if (r == 0)
-                r = DiskHelper.getBlockSize();
+                r = DiskUtils.BLOCK_SIZE;
 
             return r;
         }
@@ -130,13 +130,13 @@ public class RealFileSystem implements FileSystem {
             if (length == 0 || length() == 0)
                 return 0;
 
-            int firstBlock = pos / DiskHelper.getBlockSize();
-            byte[] tmp = new byte[DiskHelper.getBlockSize()];
+            int firstBlock = pos / DiskUtils.BLOCK_SIZE;
+            byte[] tmp = new byte[DiskUtils.BLOCK_SIZE];
 
             int r = 0, i = firstBlock;
             while (r < length) {
-                int begin = (i == firstBlock) ? (pos % DiskHelper
-                        .getBlockSize()) : 0;
+                int begin = (i == firstBlock) ? (pos % DiskUtils.BLOCK_SIZE)
+                        : 0;
                 int read = readBlock(i, tmp, 0);
                 int c = Math.min(read - begin, length - r);
                 if (c <= 0)
@@ -144,7 +144,7 @@ public class RealFileSystem implements FileSystem {
                 System.arraycopy(tmp, begin, buf, offset + r, c);
                 r += c;
 
-                if (read < DiskHelper.getBlockSize())
+                if (read < DiskUtils.BLOCK_SIZE)
                     break;
                 else
                     ++i;
@@ -160,16 +160,15 @@ public class RealFileSystem implements FileSystem {
 
             cnf.setDirty();
 
-            NormalFile inode = cnf.normalFile();
-            int capacity = getBlockCount() * DiskHelper.getBlockSize();
+            PlainINode inode = cnf.normalFile();
+            int capacity = getBlockCount() * DiskUtils.BLOCK_SIZE;
             if (capacity < newSize) {
-                int d = (newSize - capacity - 1) / DiskHelper.getBlockSize()
-                        + 1;
+                int d = (newSize - capacity - 1) / DiskUtils.BLOCK_SIZE + 1;
                 Lib.assertTrue(d > 0);
 
                 LinkedList<Integer> places = new LinkedList<Integer>();
                 for (int i = 0; i < d; ++i) {
-                    int t = freeList.occupy();
+                    int t = freeList.assign();
                     if (t == -1) {
                         for (Integer p : places)
                             freeList.free(p.intValue());
@@ -178,19 +177,19 @@ public class RealFileSystem implements FileSystem {
                         places.add(new Integer(t));
                 }
 
-                NormalFile current = inode;
+                PlainINode current = inode;
                 while (!places.isEmpty()) {
                     int block = places.remove().intValue();
 
                     if (current.addLink(block) == false) {
-                        int t = freeList.occupy();
+                        int t = freeList.assign();
                         if (t == -1) {
                             Lib.debug(
                                     dbgFilesys,
                                     "Fatal error: not enough disk space to store inode; may cause filesys inconsistent");
                             return false;
                         }
-                        NormalFile next = NormalFile.create(t, false, 0);
+                        PlainINode next = PlainINode.create(t, false, 0);
                         current.setNext(t);
                         if (current != inode)
                             current.save();
@@ -219,15 +218,15 @@ public class RealFileSystem implements FileSystem {
             if (length() < pos + length && !expand(pos + length))
                 return -1;
 
-            int firstBlock = pos / DiskHelper.getBlockSize();
-            byte[] tmp = new byte[DiskHelper.getBlockSize()];
+            int firstBlock = pos / DiskUtils.BLOCK_SIZE;
+            byte[] tmp = new byte[DiskUtils.BLOCK_SIZE];
 
             int r = 0, i = firstBlock;
             while (r < length) {
-                int begin = (i == firstBlock) ? (pos % DiskHelper
-                        .getBlockSize()) : 0;
-                int c = Math.min(DiskHelper.getBlockSize() - begin, length - r);
-                if (c < DiskHelper.getBlockSize())
+                int begin = (i == firstBlock) ? (pos % DiskUtils.BLOCK_SIZE)
+                        : 0;
+                int c = Math.min(DiskUtils.BLOCK_SIZE - begin, length - r);
+                if (c < DiskUtils.BLOCK_SIZE)
                     readBlock(i, tmp, 0);
                 System.arraycopy(buf, offset + r, tmp, begin, c);
                 writeBlock(i, tmp, 0);
@@ -306,7 +305,7 @@ public class RealFileSystem implements FileSystem {
                 Lib.debug(dbgFilesys, "Broken filesys detected; formatting");
                 createFilesys();
             } else {
-                freeList = freeList.load(sb.freeList);
+                freeList = freeList.loadFromDisk(sb.freeList);
             }
         }
     }
@@ -314,7 +313,7 @@ public class RealFileSystem implements FileSystem {
     public void createFilesys() {
         SuperBlock.create(rootBlock, freeListBlock);
 
-        Directory.create(rootBlock, -1);
+        DirINode.create(rootBlock, -1);
         freeList = FreeList.create(freeListBlock, filesysHead);
     }
 
@@ -336,10 +335,10 @@ public class RealFileSystem implements FileSystem {
         return fileName.substring(pos + 1);
     }
 
-    private Entry findSingleEntry(Directory parent, String fileName) {
+    private FileEntry findSingleEntry(DirINode parent, String fileName) {
         Lib.assertTrue(parent != null);
 
-        Entry entry = parent.find(fileName);
+        FileEntry entry = parent.find(fileName);
         Lib.debug(dbgFilesys, "reached2" + fileName);
 
         if (entry != null)
@@ -350,9 +349,9 @@ public class RealFileSystem implements FileSystem {
             return null;
     }
 
-    private String findEntryName(Directory parent, int block) {
+    private String findEntryName(DirINode parent, int block) {
         for (int i = 0; i < parent.getValidCount(); ++i) {
-            Entry e = parent.getEntry(i);
+            FileEntry e = parent.getEntry(i);
             if (e.block == block)
                 return e.name;
         }
@@ -363,7 +362,7 @@ public class RealFileSystem implements FileSystem {
             return null;
     }
 
-    private Entry findEntryRaw(String absoluteFileName, boolean symbolic,
+    private FileEntry findEntryRaw(String absoluteFileName, boolean symbolic,
             int depth) {
         if (depth < 0)
             return null;
@@ -376,9 +375,9 @@ public class RealFileSystem implements FileSystem {
                     absoluteFileName.length() - 1);
 
         int token = absoluteFileName.indexOf("/");
-        Directory current = Directory.load(rootBlock);
+        DirINode current = DirINode.loadFromDisk(rootBlock);
         if (token == -1)
-            return new Entry(Entry.DIRECTORY, rootBlock, "/");
+            return new FileEntry(FileEntry.DIRECTORY, rootBlock, "/");
 
         while (true) {
             int nextToken = absoluteFileName.indexOf("/", token + 1);
@@ -389,13 +388,13 @@ public class RealFileSystem implements FileSystem {
             else
                 e = absoluteFileName.substring(token + 1);
 
-            Entry entry = findSingleEntry(current, e);
+            FileEntry entry = findSingleEntry(current, e);
             Lib.debug(dbgFilesys, "reached1");
             if (entry == null)
                 return null;
             else {
-                if (entry.type == Entry.SYMBOLIC_LINK) {
-                    SymbolicLink sl = (SymbolicLink) entry.load();
+                if (entry.type == FileEntry.SYMLINK) {
+                    SymINode sl = (SymINode) entry.load();
 
                     String s;
                     if (nextToken != -1) {
@@ -417,10 +416,10 @@ public class RealFileSystem implements FileSystem {
                     if (nextToken == -1)
                         return entry;
                     else {
-                        if (entry.type != Entry.DIRECTORY)
+                        if (entry.type != FileEntry.DIRECTORY)
                             return null;
                         else
-                            current = (Directory) entry.load();
+                            current = (DirINode) entry.load();
                     }
                 }
             }
@@ -429,11 +428,11 @@ public class RealFileSystem implements FileSystem {
         }
     }
 
-    private Entry findEntry(String absoluteFileName, boolean symbolic) {
+    private FileEntry findEntry(String absoluteFileName, boolean symbolic) {
         return findEntryRaw(absoluteFileName, symbolic, 128);
     }
 
-    private Entry findFileEntryRaw(String absoluteFileName, boolean parent,
+    private FileEntry findFileEntryRaw(String absoluteFileName, boolean parent,
             int depth) {
         if (depth < 0)
             return null;
@@ -444,18 +443,18 @@ public class RealFileSystem implements FileSystem {
         if (path == null || file == null)
             return null;
         // Lib.debug(dbgFilesys, path);
-        Entry eFolder = findEntry(path, true);
+        FileEntry eFolder = findEntry(path, true);
 
-        if (eFolder == null || eFolder.type != Entry.DIRECTORY)
+        if (eFolder == null || eFolder.type != FileEntry.DIRECTORY)
             return null;
 
-        Directory folder = (Directory) eFolder.load();
-        Entry f = findSingleEntry(folder, file);
+        DirINode folder = (DirINode) eFolder.load();
+        FileEntry f = findSingleEntry(folder, file);
 
-        if (f != null && f.type == Entry.NORMAL_FILE)
+        if (f != null && f.type == FileEntry.PLAIN_FILE)
             return f;
-        else if (f != null && f.type == Entry.SYMBOLIC_LINK) {
-            SymbolicLink sl = (SymbolicLink) f.load();
+        else if (f != null && f.type == FileEntry.SYMLINK) {
+            SymINode sl = (SymINode) f.load();
             return findFileEntryRaw(sl.getTarget(), false, depth - 1);
         } else if (f != null) {
             return null;
@@ -465,7 +464,7 @@ public class RealFileSystem implements FileSystem {
             return null;
     }
 
-    private Entry findFileEntry(String absoluteFileName, boolean parent) {
+    private FileEntry findFileEntry(String absoluteFileName, boolean parent) {
         return findFileEntryRaw(absoluteFileName, parent, 128);
     }
 
@@ -502,7 +501,7 @@ public class RealFileSystem implements FileSystem {
 
     private CachedNormalFile getFile(int block) {
         if (!cachedFiles.containsKey(new Integer(block))) {
-            NormalFile nf = NormalFile.load(block);
+            PlainINode nf = PlainINode.loadFromDisk(block);
             Lib.assertTrue(nf != null);
 
             CachedNormalFile cnf = new CachedNormalFile(nf);
@@ -518,16 +517,16 @@ public class RealFileSystem implements FileSystem {
         cnf.decreaseUseCount();
     }
 
-    private boolean addEntry(Directory folder, String name, int type, int block) {
-        Directory current = folder;
+    private boolean addEntry(DirINode folder, String name, int type, int block) {
+        DirINode current = folder;
         while (current.addEntry(name, type, block) == false) {
             if (current.hasNext())
                 current = current.loadNext();
             else {
-                int dirPos = freeList.occupy();
+                int dirPos = freeList.assign();
                 if (dirPos == -1)
                     return false;
-                Directory next = Directory.create(dirPos, current.getParent());
+                DirINode next = DirINode.create(dirPos, current.getParent());
                 current.setNext(dirPos);
                 current = next;
             }
@@ -535,18 +534,18 @@ public class RealFileSystem implements FileSystem {
         return true;
     }
 
-    private NormalFile createFile(Directory folder, String fileName) {
+    private PlainINode createFile(DirINode folder, String fileName) {
         Lib.debug(dbgFilesys, "Creating file " + fileName);
 
-        int pos = freeList.occupy();
+        int pos = freeList.assign();
         if (pos == -1)
             return null;
 
         Lib.debug(dbgFilesys, "\tinode=" + pos);
 
-        NormalFile nf = NormalFile.create(pos, true, 1);
+        PlainINode nf = PlainINode.create(pos, true, 1);
 
-        if (addEntry(folder, fileName, Entry.NORMAL_FILE, pos) == false) {
+        if (addEntry(folder, fileName, FileEntry.PLAIN_FILE, pos) == false) {
             freeList.free(pos);
             return null;
         }
@@ -554,10 +553,10 @@ public class RealFileSystem implements FileSystem {
         return nf;
     }
 
-    private void ls(Directory folder) {
+    private void ls(DirINode folder) {
         while (true) {
             for (int i = 0; i < folder.getValidCount(); ++i) {
-                Entry e = folder.getEntry(i);
+                FileEntry e = folder.getEntry(i);
                 Lib.debug(dbgFilesys, e.name);
             }
 
@@ -572,25 +571,25 @@ public class RealFileSystem implements FileSystem {
     public OpenFile open(String name, boolean create) {
         Lib.debug(dbgFilesys, "Opening " + name);
 
-        Entry e = findFileEntry(name, create);
+        FileEntry e = findFileEntry(name, create);
         if (e == null) {
             Lib.debug(dbgFilesys, "\t" + name + " not found");
             return null;
-        } else if (e.type == Entry.NORMAL_FILE) {
+        } else if (e.type == FileEntry.PLAIN_FILE) {
             Lib.debug(dbgFilesys, "\tinode=" + e.block);
 
             CachedNormalFile cnf = getFile(e.block);
             cnf.increaseUseCount();
             return new File(cnf, name);
         } else {
-            Lib.assertTrue(e.type == Entry.DIRECTORY);
+            Lib.assertTrue(e.type == FileEntry.DIRECTORY);
 
             String fileName = fileName(name);
             if (fileName == null)
                 return null;
 
-            Directory dir = Directory.load(e.block);
-            NormalFile nf = createFile(dir, fileName);
+            DirINode dir = DirINode.loadFromDisk(e.block);
+            PlainINode nf = createFile(dir, fileName);
             if (nf == null)
                 return null;
             else {
@@ -608,20 +607,20 @@ public class RealFileSystem implements FileSystem {
         if (path == null || file == null)
             return false;
 
-        Entry eFolder = findEntry(path, true);
+        FileEntry eFolder = findEntry(path, true);
         Lib.debug(dbgFilesys, String.valueOf(eFolder == null));
-        if (eFolder == null || eFolder.type != Entry.DIRECTORY)
+        if (eFolder == null || eFolder.type != FileEntry.DIRECTORY)
             return false;
-        Directory folder = (Directory) eFolder.load();
+        DirINode folder = (DirINode) eFolder.load();
         Lib.assertTrue(folder != null);
 
-        Entry entry = findSingleEntry(folder, file);
-        if (entry == null || entry.type == Entry.DIRECTORY)
+        FileEntry entry = findSingleEntry(folder, file);
+        if (entry == null || entry.type == FileEntry.DIRECTORY)
             return false;
 
         Lib.assertTrue(removeEntry(folder, file));
 
-        if (entry.type == Entry.NORMAL_FILE) {
+        if (entry.type == FileEntry.PLAIN_FILE) {
             CachedNormalFile cnf = getFile(entry.block);
             cnf.normalFile().decreaseLinkCount();
             if (!doRemoveFile(entry.block))
@@ -632,13 +631,13 @@ public class RealFileSystem implements FileSystem {
         return true;
     }
 
-    private boolean removeEntry(Directory folder, String name) {
-        Directory current = folder, last = null, target = null;
-        Entry supplant = null;
+    private boolean removeEntry(DirINode folder, String name) {
+        DirINode current = folder, last = null, target = null;
+        FileEntry supplant = null;
         int pos = -1;
         while (true) {
             if (pos == -1) {
-                pos = current.findPos(name);
+                pos = current.findSubDirIdx(name);
                 if (pos != -1)
                     target = current;
             }
@@ -657,7 +656,7 @@ public class RealFileSystem implements FileSystem {
                     if (target != null) {
                         Lib.assertTrue(pos != -1);
 
-                        target.replaceEntry(pos, supplant.name, supplant.type,
+                        target.modifyEntry(pos, supplant.name, supplant.type,
                                 supplant.block);
                         Lib.assertTrue(current.removeLastEntry());
 
@@ -679,11 +678,11 @@ public class RealFileSystem implements FileSystem {
         return true;
     }
 
-    private void freeFile(NormalFile nf) {
+    private void freeFile(PlainINode nf) {
         int block = nf.getBlock();
         cachedFiles.remove(new Integer(block));
 
-        NormalFile current = nf;
+        PlainINode current = nf;
         while (current != null) {
             for (int i = 0; i < current.getValidCount(); ++i)
                 freeList.free(current.getLink(i));
@@ -721,21 +720,21 @@ public class RealFileSystem implements FileSystem {
         if (path == null || dir == null || dir.length() == 0)
             return false;
 
-        Entry entry = findEntry(path, true);
-        if (entry == null || entry.type != Entry.DIRECTORY)
+        FileEntry entry = findEntry(path, true);
+        if (entry == null || entry.type != FileEntry.DIRECTORY)
             return false;
 
-        Directory folder = (Directory) entry.load();
+        DirINode folder = (DirINode) entry.load();
         if (findSingleEntry(folder, dir) != null)
             return false;
 
-        int block = freeList.occupy();
+        int block = freeList.assign();
         if (block == -1)
             return false;
 
-        Directory.create(block, entry.block);
+        DirINode.create(block, entry.block);
 
-        if (!addEntry(folder, dir, Entry.DIRECTORY, block)) {
+        if (!addEntry(folder, dir, FileEntry.DIRECTORY, block)) {
             freeList.free(block);
             return false;
         }
@@ -749,23 +748,23 @@ public class RealFileSystem implements FileSystem {
         if (path == null || fileName == null || fileName.length() == 0)
             return false;
 
-        Entry entry = findEntry(path, true);
-        if (entry == null || entry.type != Entry.DIRECTORY)
+        FileEntry entry = findEntry(path, true);
+        if (entry == null || entry.type != FileEntry.DIRECTORY)
             return false;
 
-        Directory folder = (Directory) entry.load();
+        DirINode folder = (DirINode) entry.load();
 
-        Entry t = findSingleEntry(folder, fileName);
-        if (t == null || t.type == Entry.NORMAL_FILE)
+        FileEntry t = findSingleEntry(folder, fileName);
+        if (t == null || t.type == FileEntry.PLAIN_FILE)
             return false;
 
-        if (t.type == Entry.SYMBOLIC_LINK) {
+        if (t.type == FileEntry.SYMLINK) {
             removeEntry(folder, fileName);
             freeList.free(t.block);
         } else {
-            Lib.assertTrue(t.type == Entry.DIRECTORY);
+            Lib.assertTrue(t.type == FileEntry.DIRECTORY);
 
-            Directory dt = (Directory) t.load();
+            DirINode dt = (DirINode) t.load();
             if (dt.getValidCount() > 0 || dt.hasNext())
                 return false;
 
@@ -781,18 +780,18 @@ public class RealFileSystem implements FileSystem {
     }
 
     public FileStat getStat(String name) {
-        Entry entry = findEntry(name, false);
+        FileEntry entry = findEntry(name, false);
         if (entry == null)
             return null;
-        if (entry.type == Entry.NORMAL_FILE) {
-            NormalFile nf = getFile(entry.block).normalFile();
-            return new FileStat(name, nf.getSize(), Entry.NORMAL_FILE, 0, 0,
+        if (entry.type == FileEntry.PLAIN_FILE) {
+            PlainINode nf = getFile(entry.block).normalFile();
+            return new FileStat(name, nf.getSize(), FileEntry.PLAIN_FILE, 0, 0,
                     nf.getLinkCount());
-        } else if (entry.type == Entry.SYMBOLIC_LINK) {
-            return new FileStat(name, 0, Entry.SYMBOLIC_LINK, 0, 0, 0);
+        } else if (entry.type == FileEntry.SYMLINK) {
+            return new FileStat(name, 0, FileEntry.SYMLINK, 0, 0, 0);
         } else {
-            Lib.assertTrue(entry.type == Entry.DIRECTORY);
-            return new FileStat(name, 0, Entry.DIRECTORY, 0, 0, 0);
+            Lib.assertTrue(entry.type == FileEntry.DIRECTORY);
+            return new FileStat(name, 0, FileEntry.DIRECTORY, 0, 0, 0);
         }
     }
 
@@ -802,23 +801,23 @@ public class RealFileSystem implements FileSystem {
         if (path == null || name == null || name.length() == 0)
             return false;
 
-        Entry eSrc = findEntry(src, true);
-        if (eSrc == null || eSrc.type != Entry.NORMAL_FILE)
+        FileEntry eSrc = findEntry(src, true);
+        if (eSrc == null || eSrc.type != FileEntry.PLAIN_FILE)
             return false;
 
         CachedNormalFile cnf = getFile(eSrc.block);
 
-        Entry eDst = findEntry(path, true);
-        if (eDst == null || eDst.type != Entry.DIRECTORY)
+        FileEntry eDst = findEntry(path, true);
+        if (eDst == null || eDst.type != FileEntry.DIRECTORY)
             return false;
 
-        Directory fDst = (Directory) eDst.load();
+        DirINode fDst = (DirINode) eDst.load();
         if (findSingleEntry(fDst, name) != null)
             return false;
 
         cnf.setDirty();
         cnf.normalFile().increaseLinkCount();
-        if (addEntry(fDst, name, Entry.NORMAL_FILE, eSrc.block) == false) {
+        if (addEntry(fDst, name, FileEntry.PLAIN_FILE, eSrc.block) == false) {
             cnf.normalFile().decreaseLinkCount();
             return false;
         }
@@ -832,17 +831,17 @@ public class RealFileSystem implements FileSystem {
         if (path == null || name == null || name.length() == 0)
             return false;
 
-        Entry eDst = findEntry(path, true);
-        if (eDst == null || eDst.type != Entry.DIRECTORY)
+        FileEntry eDst = findEntry(path, true);
+        if (eDst == null || eDst.type != FileEntry.DIRECTORY)
             return false;
 
-        Directory fDst = (Directory) eDst.load();
+        DirINode fDst = (DirINode) eDst.load();
         if (findSingleEntry(fDst, name) != null)
             return false;
 
-        int block = freeList.occupy();
-        SymbolicLink sl = SymbolicLink.create(block, src);
-        if (addEntry(fDst, name, Entry.SYMBOLIC_LINK, block) == false) {
+        int block = freeList.assign();
+        SymINode sl = SymINode.create(block, src);
+        if (addEntry(fDst, name, FileEntry.SYMLINK, block) == false) {
             freeList.free(block);
             return false;
         }
@@ -851,10 +850,10 @@ public class RealFileSystem implements FileSystem {
     }
 
     private String constructPathName(int block, int lower) {
-        Directory dir = null;
+        DirINode dir = null;
         String name = "";
         if (block != rootBlock || lower != -1)
-            dir = Directory.load(block);
+            dir = DirINode.loadFromDisk(block);
         if (lower != -1) {
             name = findEntryName(dir, lower) + "/";
             Lib.assertTrue(name != null);
@@ -867,8 +866,8 @@ public class RealFileSystem implements FileSystem {
     }
 
     public String getCanonicalPathName(String name) {
-        Entry entry = findEntry(name, true);
-        if (entry == null || entry.type != Entry.DIRECTORY)
+        FileEntry entry = findEntry(name, true);
+        if (entry == null || entry.type != FileEntry.DIRECTORY)
             return null;
 
         return constructPathName(entry.block, -1);

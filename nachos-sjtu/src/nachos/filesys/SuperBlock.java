@@ -12,18 +12,18 @@ public class SuperBlock {
     }
 
     public static void create(int rootDir, int freeList) {
-        byte[] data = new byte[DiskHelper.getBlockSize()];
+        byte[] data = new byte[DiskUtils.BLOCK_SIZE];
         
         Lib.bytesFromInt(data, 0, magicNumber);
         Lib.bytesFromInt(data, 4, rootDir);
         Lib.bytesFromInt(data, 8, freeList);
 
-        DiskHelper.getInstance().writeBlock(0, 1, data);
+        DiskUtils.getInstance().writeBlock(0, 1, data);
     }
 
     public static SuperBlock load() {
-        byte[] data = new byte[DiskHelper.getBlockSize()];
-        DiskHelper.getInstance().readBlock(0, 1, data);
+        byte[] data = new byte[DiskUtils.BLOCK_SIZE];
+        DiskUtils.getInstance().readBlock(0, 1, data);
         
         if (magicNumber != Lib.bytesToInt(data, 0))
             return null;

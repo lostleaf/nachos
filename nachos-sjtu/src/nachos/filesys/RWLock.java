@@ -3,46 +3,52 @@ package nachos.filesys;
 import nachos.threads.Lock;
 import nachos.threads.Condition;
 
-public class ConcurrencyController {
-    private Lock lock;
-    private Condition cond;
-    private int readCount, writeCount;
+public class RWLock {
 
-    public ConcurrencyController() {
+    public RWLock() {
         lock = new Lock();
         cond = new Condition(lock);
-        readCount = 0;
-        writeCount = 0;
     }
 
-    public void beginRead() {
+    public void acquireRead() {
         lock.acquire();
+
         while (writeCount > 0)
             cond.sleep();
         ++readCount;
+
         lock.release();
     }
 
-    public void endRead() {
+    public void acquireWrite() {
         lock.acquire();
-        --readCount;
-        if (readCount == 0)
-            cond.wakeAll();
-        lock.release();
-    }
 
-    public void beginWrite() {
-        lock.acquire();
         while (writeCount > 0 || readCount > 0)
             cond.sleep();
         ++writeCount;
+
         lock.release();
     }
 
-    public void endWrite() {
+    public void releaseRead() {
         lock.acquire();
-        --writeCount;
-        cond.wakeAll();
+
+        if (--readCount == 0)
+            cond.wakeAll();
+
         lock.release();
     }
+
+    public void releaseWrite() {
+        lock.acquire();
+
+        --writeCount;
+        cond.wakeAll();
+
+        lock.release();
+    }
+
+    private Lock lock;
+    private Condition cond;
+    private int readCount = 0, writeCount = 0;
 }

@@ -1,7 +1,6 @@
 package nachos.filesys;
 
 public abstract class INode {
-    protected int block, type;
 
     public INode(int type) {
         this.type = type;
@@ -16,4 +15,12 @@ public abstract class INode {
     }
 
     public abstract void save();
+
+    protected int block, type, nValid, next;
+    protected boolean primary;
+    protected int[] links;
+
+    final public static int TYPE_DIR = 1;
+    final public static int TYPE_FILE = 2;
+    final public static int TYPE_SYM = 3;
 }
