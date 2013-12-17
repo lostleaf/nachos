@@ -1,167 +1,131 @@
 package nachos.filesys;
 
 import java.util.Arrays;
-import nachos.machine.Lib;
 
+/**
+ * FreeList is a single special file used to manage free space of the
+ * filesystem. It maintains a list of sector numbers to indicate those that are
+ * available to use. When there's a need to allocate a new sector in the
+ * filesystem, call allocate(). And you should call deallocate() to free space
+ * at a appropriate time (eg. when a file is deleted) for reuse in the future.
+ * 
+ * @author starforever
+ */
 public class FreeList {
 
-    private FreeList() {
-        dirty = false;
-    }
+	private FreeList() {
+		dirty = false;
+	}
 
-    private FreeList(int block, byte[] data) {
-        this.block = block;
-        this.data = data;
-    }
+	private FreeList(int block, byte[] data) {
+		this.block = block;
+		this.data = data;
+	}
 
-    public static FreeList loadFromDisk(int block) {
-        FreeList list = new FreeList(block, new byte[DiskUtils.BLOCK_SIZE
-                * getBlocksCount()]);
+	public static FreeList create(int block, int head) {
+		int count = getBlocksCount();
+		FreeList list = new FreeList(block, new byte[count
+				* DiskUtils.BLOCK_SIZE]);
 
-        DiskUtils.getInstance().readBlock(block, FreeList.getBlocksCount(),
-                list.data);
+		Arrays.fill(list.data, (byte) 0);
+		int nBlocks = DiskUtils.DISK_SIZE / DiskUtils.BLOCK_SIZE;
 
-        return list;
-    }
+		for (int i = 0; i < head; ++i)
+			list.setUse(i);
+		for (int i = block; i < block + count; ++i)
+			list.setUse(i);
+		for (int i = nBlocks; i < list.getLeavesNum(); ++i)
+			list.setUse(i);
 
-    public int assign() {
-        int r = getFree();
-        dirty = true;
-        setUse(r);
-        return r;
-    }
+		list.save();
+		return list;
+	}
 
-    public void free(int i) {
-        resetUse(i);
-        dirty = true;
-        Lib.assertTrue(get(i + leaves() - 1) == 0);
-    }
+	/** allocate a new sector in the disk */
+	public int allocate() {
+		int r = getFree();
+		dirty = true;
+		setUse(r);
+		return r;
+	}
 
-    public static int getBlocksCount() {
-        int nBlocks = (int) (DiskUtils.DISK_SIZE / (long) DiskUtils.BLOCK_SIZE);
-        int count = 1;
-        while (count * DiskUtils.BLOCK_SIZE * 8 < nBlocks)
-            count *= 2;
-        return count * 2;
-    }
+	/** deallocate a sector to be reused */
+	public void deallocate(int i) {
+		resetUse(i);
+		dirty = true;
+	}
 
-    public static FreeList create(int block, int head) {
-        FreeList fl = new FreeList();
-        fl.block = block;
+	/** load the content of freelist from the disk */
+	public static FreeList load(int block) {
+		FreeList list = new FreeList(block, new byte[DiskUtils.BLOCK_SIZE
+				* getBlocksCount()]);
 
-        int count = getBlocksCount();
-        fl.data = new byte[count * DiskUtils.BLOCK_SIZE];
-        Arrays.fill(fl.data, (byte) 0);
-        int nBlocks = (int) (DiskUtils.DISK_SIZE / (long) DiskUtils.BLOCK_SIZE);
+		DiskUtils.getInstance().readBlock(block, FreeList.getBlocksCount(),
+				list.data);
 
-        for (int i = 0; i < head; ++i)
-            fl.setUse(i);
-        for (int i = block; i < block + count; ++i)
-            fl.setUse(i);
-        for (int i = nBlocks; i < fl.leaves(); ++i)
-            fl.setUse(i);
+		return list;
+	}
 
-        fl.save();
+	/** save the content of freelist to the disk */
+	public void save() {
+		if (!dirty)
+			return;
 
-        return fl;
-    }
+		DiskUtils.getInstance().writeBlock(block,
+				data.length / DiskUtils.BLOCK_SIZE, data);
+		dirty = false;
+	}
 
-    public void save() {
-        if (!dirty)
-            return;
+	public static int getBlocksCount() {
+		return 2;
+	}
 
-        int count = data.length / DiskUtils.BLOCK_SIZE;
-        DiskUtils.getInstance().writeBlock(block, count, data);
-        dirty = false;
-    }
+	private int getLeavesNum() {
+		return data.length << 2;
+	}
 
-    private int leaves() {
-        return data.length << 2;
-    }
+	private void set(int i) {
+		data[i >> 3] |= 1 << (7 ^ (i & 7));
+	}
 
-    private byte bitSet(byte x, int pos) {
-        pos = 7 - pos;
-        return (byte) (x | (1 << pos));
-    }
+	private void reset(int i) {
+		data[i >> 3] &= ~(1 << (7 ^ (i & 7)));
+	}
 
-    private byte bitReset(byte x, int pos) {
-        pos = 7 - pos;
-        return (byte) (x & ~(1 << pos));
-    }
+	private byte get(int i) {
+		return (byte) ((data[i >> 3] >> (7 ^ (7 & i))) & 1);
+	}
 
-    private byte bitGet(byte x, int pos) {
-        pos = 7 - pos;
-        return (byte) ((x >> pos) & 1);
-    }
+	private void update(int p) {
+		for (; p > 0; p = ((p - 1) >> 1)) {
+			int bro = p + ((p & 1) == 1 ? 1 : -1);
+			if (get(p) != 0 && get(bro) != 0)
+				set((p - 1) >> 1);
+			else
+				reset((p - 1) >> 1);
+		}
+	}
 
-    private void set(int i) {
-        data[i >> 3] = bitSet(data[i >> 3], i & 7);
-    }
+	private int getFree() {
+		int i = 0, l = getLeavesNum();
+		for (; i < l - 1; i += get(i) != 0 ? 1 : 0)
+			i = (i << 1) + 1;
+		return i - l + 1;
+	}
 
-    private void reset(int i) {
-        data[i >> 3] = bitReset(data[i >> 3], i & 7);
-    }
+	private void setUse(int i) {
+		int p = i + getLeavesNum() - 1;
+		set(p);
+		update(p);
+	}
 
-    private byte get(int i) {
-        return bitGet(data[i >> 3], i & 7);
-    }
+	private void resetUse(int i) {
+		int p = i + getLeavesNum() - 1;
+		reset(p);
+		update(p);
+	}
 
-    private void update(int p) {
-        int l, r;
-
-        do {
-            p = ((p - 1) >> 1);
-            l = (p << 1) + 1;
-            r = l + 1;
-            if (get(l) != 0 && get(r) != 0)
-                set(p);
-            else
-                reset(p);
-        } while (p > 0);
-    }
-
-    private void setUse(int i) {
-        int p = i + leaves() - 1;
-        set(p);
-        update(p);
-    }
-
-    private void resetUse(int i) {
-        int p = i + leaves() - 1;
-        reset(p);
-        update(p);
-    }
-
-    private int getFree() {
-        int i = 0, l = leaves();
-        while (i < l - 1) {
-            if (get(i) != 0)
-                return -1;
-
-            i = (i << 1) + 1;
-            if (get(i) != 0) {
-                i = i + 1;
-                Lib.assertTrue(get(i) == 0);
-            }
-        }
-
-        return i - l + 1;
-    }
-
-    private void check() {
-        int leaves = leaves();
-        for (int i = 0; i < leaves - 1; ++i) {
-            int l = i * 2 + 1, r = l + 1;
-            if (get(i) != 0) {
-                Lib.assertTrue(get(l) != 0 && get(r) != 0, "i=" + i);
-            } else {
-                Lib.assertTrue(get(l) == 0 || get(r) == 0);
-            }
-        }
-    }
-
-    private static final char dbgFilesys = 'f';
-    private int block;
-    private byte[] data;
-    private boolean dirty;
+	private int block;
+	private byte[] data;
+	private boolean dirty;
 }

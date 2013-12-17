@@ -77,7 +77,7 @@ public class FilesysProcess extends VMProcess {
 
     private int handleChdir(int pathAddr) {
         String dir = readVirtualMemoryString(pathAddr, MAX_ARG_LEN);
-        String t = getFileSystem().getCanonicalPathName(toAbsPath(dir));
+        String t = getFileSystem().getFormalPathName(toAbsPath(dir));
         if (dir == null || t == null)
             return -1;
 
@@ -107,8 +107,8 @@ public class FilesysProcess extends VMProcess {
         return -1;
     }
 
-    private int handleStat(int a0, int a1) {
-        String file = readVirtualMemoryString(a0, MAX_ARG_LEN);
+    private int handleStat(int fileNameAddr, int statAddr) {
+        String file = readVirtualMemoryString(fileNameAddr, MAX_ARG_LEN);
         if (file == null)
             return -1;
 
@@ -134,24 +134,24 @@ public class FilesysProcess extends VMProcess {
         Lib.bytesFromInt(buffer, offset + 12, stat.inode);
         Lib.bytesFromInt(buffer, offset + 16, stat.links);
 
-        writeVirtualMemory(a1, buffer, 0, buffer.length);
+        writeVirtualMemory(statAddr, buffer, 0, buffer.length);
 
         return 0;
     }
 
     private int toStatType(int stattype) {
-        if (stattype == FileEntry.DIRECTORY)
+        if (stattype == FolderEntry.FOLDER)
             return 1;
-        if (stattype == FileEntry.PLAIN_FILE)
+        if (stattype == FolderEntry.PLAIN_FILE)
             return 0;
-        if (stattype == FileEntry.SYMLINK)
+        if (stattype == FolderEntry.SYMLINK)
             return 2;
         return -1;
     }
 
-    private int handleLink(int a0, int a1) {
-        String src = readVirtualMemoryString(a0, MAX_ARG_LEN);
-        String dst = readVirtualMemoryString(a1, MAX_ARG_LEN);
+    private int handleLink(int oldNameAddr, int newNameAddr) {
+        String src = readVirtualMemoryString(oldNameAddr, MAX_ARG_LEN);
+        String dst = readVirtualMemoryString(newNameAddr, MAX_ARG_LEN);
 
         if (src == null || dst == null)
             return -1;
@@ -160,9 +160,9 @@ public class FilesysProcess extends VMProcess {
                 : -1;
     }
 
-    private int handleSymlink(int a0, int a1) {
-        String src = readVirtualMemoryString(a0, MAX_ARG_LEN);
-        String dst = readVirtualMemoryString(a1, MAX_ARG_LEN);
+    private int handleSymlink(int oldNameAddr, int newNameAddr) {
+        String src = readVirtualMemoryString(oldNameAddr, MAX_ARG_LEN);
+        String dst = readVirtualMemoryString(newNameAddr, MAX_ARG_LEN);
         if (src == null || dst == null)
             return -1;
 
